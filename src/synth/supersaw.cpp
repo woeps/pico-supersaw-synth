@@ -1,4 +1,5 @@
 #include "synth/supersaw.h"
+#include "synth/saw_wavetable.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -93,11 +94,16 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         int32_t sample = 0;
 
         if (active) {
-            // Sum 7 sawtooth oscillators
+            // Sum 7 band-limited sawtooth oscillators via wavetable lookup
+            const int16_t* table = sawWavetable[noteToOctaveBand[currentNote]];
             for (int osc = 0; osc < NUM_OSCILLATORS; osc++) {
                 phase[osc] += phaseInc[osc];
-                // Convert phase to sawtooth: map 0..2^32 to -32768..32767
-                int32_t saw = static_cast<int32_t>(phase[osc] >> 16) - 32768;
+                // Wavetable lookup with linear interpolation
+                uint32_t idx = phase[osc] >> 21;              // top 11 bits → table index (0..2047)
+                uint32_t frac = (phase[osc] >> 5) & 0xFFFF;   // next 16 bits → fractional part
+                int16_t s0 = table[idx];
+                int16_t s1 = table[(idx + 1) & (WAVETABLE_SIZE - 1)];
+                int32_t saw = s0 + ((static_cast<int32_t>(s1 - s0) * static_cast<int32_t>(frac)) >> 16);
                 sample += saw;
             }
 
