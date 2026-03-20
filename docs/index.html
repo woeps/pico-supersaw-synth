@@ -16,10 +16,10 @@
     window.$docsify = {
       name: 'SuperSaw MIDI Synth',
       repo: 'https://github.com/woeps/supersaw-midi-synth',
-      basePath: DEPLOYED ? 'https://raw.githubusercontent.com/woeps/supersaw-midi-synth/main/docs/' : './',
-      loadSidebar: DEPLOYED ? 'https://raw.githubusercontent.com/woeps/supersaw-midi-synth/main/webpage/_sidebar.md' : '_sidebar.md',
+      basePath: DEPLOYED ? 'https://raw.githubusercontent.com/woeps/pico-supersaw-synth/main/docs/' : './',
+      loadSidebar: DEPLOYED ? 'https://raw.githubusercontent.com/woeps/pico-supersaw-synth/main/docs/_sidebar.md' : '_sidebar.md',
       loadNavbar: false,
-      coverpage: DEPLOYED ? 'https://raw.githubusercontent.com/woeps/supersaw-midi-synth/main/webpage/_coverpage.md' : '_coverpage.md',
+      coverpage: DEPLOYED ? 'https://raw.githubusercontent.com/woeps/pico-supersaw-synth/main/docs/_coverpage.md' : '_coverpage.md',
       maxLevel: 4,
       subMaxLevel: 2,
       search: 'auto',
@@ -45,7 +45,7 @@
                 .replace(/\/master/, '/blob/master')
                 .replace(/\/main/, '/blob/main')
             } else {
-              url = 'https://github.com/woeps/supersaw-midi-synth/blob/main/docs/' + vm.route.file
+              url = 'https://github.com/woeps/pico-supersaw-synth/blob/main/docs/' + vm.route.file
             }
             var editHtml = '[:memo: Edit Document](' + url + ')\n'
             return editHtml + html
