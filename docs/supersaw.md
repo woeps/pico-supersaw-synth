@@ -26,13 +26,31 @@ Each oscillator uses a 32-bit phase accumulator. On every sample:
 phase += phaseIncrement
 ```
 
-The phase wraps naturally at 2^32, producing a sawtooth wave. The sawtooth value is extracted as:
+The phase wraps naturally at 2^32.
+
+## Band-Limited Wavetable Synthesis
+
+Rather than using a naive sawtooth (which has infinite harmonics and causes aliasing), this implementation uses pre-computed band-limited wavetables. Each wavetable contains one cycle of a sawtooth wave with harmonics limited to below the Nyquist frequency (22050 Hz) for its frequency range.
+
+### Octave Bands
+
+11 octave bands cover MIDI notes 0–127. Each band uses a different wavetable optimized for that frequency range:
+
+- Band 0: notes 0–11 (lowest frequencies, most harmonics)
+- Band 10: notes 120–127 (highest frequencies, fewest harmonics)
+
+### Wavetable Lookup
+
+The phase accumulator (32-bit) is used to index into the wavetable:
 
 ```
-saw = (phase >> 16) - 16384
+idx  = phase >> 21        // top 11 bits → table index (0..2047)
+frac = (phase >> 5) & 0xFFFF  // next 16 bits → fractional part
+
+saw = s0 + ((s1 - s0) * frac) >> 16  // linear interpolation
 ```
 
-This maps the full 0..2^32 phase range to a signed 16-bit-ish audio range.
+Linear interpolation between adjacent samples smooths the output and reduces quantization artifacts. The wavetables are stored in flash (not RAM) as `const` data.
 
 ## Phase Increment Calculation
 

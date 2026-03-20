@@ -42,3 +42,9 @@ With a single voice, when a new note arrives it immediately replaces the current
 ## Sample Rate: 44100 Hz
 
 Standard CD-quality sample rate. The PCM5102A supports both 44100 and 48000 Hz. 44100 Hz was chosen as the conventional default and requires slightly less CPU per second.
+
+## Band-Limited Wavetable Synthesis
+
+A naive sawtooth waveform has infinite harmonics that extend beyond the Nyquist frequency, causing aliasing (audible as harsh artifacts at high frequencies). Instead of oversampling or complex anti-aliasing filtering, this implementation uses pre-computed band-limited wavetables.
+
+11 octave bands cover MIDI notes 0–127. Each wavetable is generated via additive synthesis with harmonics limited to below 22050 Hz for its frequency range. At render time, linear interpolation between table samples provides smooth playback. The tables are stored in flash (not RAM), using ~44 KB of the 2 MB available.
