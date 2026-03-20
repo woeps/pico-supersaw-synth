@@ -174,6 +174,8 @@ void Supersaw::init() {
     detuneSmoothCounter = 0;
 
     recalcSpread();
+
+    chorus.init();
 }
 
 void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
@@ -241,6 +243,10 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
         recalcSpread();
     } else if (cc == CC_MIX) {
         targetMix = (static_cast<int32_t>(value) * 256) / 127;
+    } else if (cc == CC_CHORUS_DEPTH) {
+        chorus.setDepth(value);
+    } else if (cc == CC_CHORUS_RATE) {
+        chorus.setRate(value);
     }
 }
 
@@ -369,8 +375,14 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         if (sampleR > 32767) sampleR = 32767;
         if (sampleR < -32768) sampleR = -32768;
 
-        buffer[i * 2]     = static_cast<int16_t>(sampleL);
-        buffer[i * 2 + 1] = static_cast<int16_t>(sampleR);
+        int16_t outL = static_cast<int16_t>(sampleL);
+        int16_t outR = static_cast<int16_t>(sampleR);
+
+        // Stereo chorus (post-mix, pre-output)
+        chorus.process(outL, outR);
+
+        buffer[i * 2]     = outL;
+        buffer[i * 2 + 1] = outR;
     }
 }
 

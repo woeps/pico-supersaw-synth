@@ -10,5 +10,7 @@
 #define CC_DETUNE  94
 #define CC_SPREAD  93
 #define CC_MIX     95
+#define CC_CHORUS_DEPTH 91
+#define CC_CHORUS_RATE  92
 
 #endif // MIDI_CC_H

@@ -68,6 +68,8 @@ All CC number assignments are centralized in `src/config/midi_cc.h` as `#define`
 | 94 | Detune | 0–127 → non-linear curve, 0–max detune |
 | 93 | Spread | 0–127 → mono to full stereo |
 | 95 | Mix | 0–127 → center only to full supersaw |
+| 91 | Chorus Depth | 0–127 → dry to full wet |
+| 92 | Chorus Rate | 0–127 → ~0.1–3.0 Hz LFO rate |
 
 ## Hybrid Waveform Generation
 
@@ -89,3 +91,8 @@ Several design choices are specifically modeled after the Roland JP-8000 supersa
 - **Parameter smoothing:** One-pole slew on mix and detune prevents zipper noise during CC sweeps (~1 ms time constant).
 - **DC-blocking HPF:** Single-pole high-pass filter (~20 Hz) per voice removes DC offset and sub-fundamental energy.
 - **Naive saw character:** Raw phase accumulator for low notes adds the bright, shimmery aliasing characteristic of the JP-8000.
+- **Stereo chorus:** Post-mix stereo chorus with modulated delay lines, matching the JP-8000's approach of mono supersaw → stereo chorus for width.
+
+## Stereo Chorus
+
+The JP-8000 generates its supersaw in mono and creates stereo width via a downstream chorus effect. This implementation adds a stereo chorus after the voice mix stage. Two delay lines (L and R) are modulated by a triangle LFO with 90° phase offset between channels. The LFO waveform is pre-computed as a 256-entry lookup table stored in flash (512 bytes), indexed by a 32-bit phase accumulator — no runtime branching for waveform generation. Delay buffers are 1024 samples (power-of-two for efficient bitmask wrapping), consuming ~4.1 KB RAM. The chorus depth defaults to 0 (dry/bypass) so existing patches are unaffected until CC 91 is sent.

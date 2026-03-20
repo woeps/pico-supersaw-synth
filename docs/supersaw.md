@@ -134,6 +134,38 @@ voiceL += (saw × gain × panL[osc]) >> 16
 voiceR += (saw × gain × panR[osc]) >> 16
 ```
 
+## Stereo Chorus
+
+A stereo chorus effect is applied to the final mixed output (after all voices are summed), modeled after the JP-8000's approach where stereo width comes from a downstream chorus rather than per-oscillator panning.
+
+### Signal Path
+
+```
+Voice Mix (÷4) → Clamp → Stereo Chorus → I2S Output
+```
+
+The chorus coexists with the per-oscillator spread — spread positions the oscillators in the stereo field, while the chorus adds modulated stereo widening on top.
+
+### Implementation
+
+Two modulated delay lines (L and R) with:
+
+- **Delay center:** 10 ms (441 samples)
+- **Delay sweep:** ±5 ms (±220 samples), giving a 5–15 ms range
+- **LFO:** Pre-computed 256-entry triangle wave table (stored in flash, 512 bytes). A 32-bit phase accumulator indexes the table.
+- **L/R phase offset:** 90° (64 entries apart in the 256-entry table)
+- **Linear interpolation** on delay buffer reads for smooth modulation
+
+### MIDI Control
+
+- **CC 91 (Chorus Depth):** Wet/dry mix. 0 = fully dry (bypass), 127 = fully wet. Default: 0.
+- **CC 92 (Chorus Rate):** LFO rate. 0 = ~0.1 Hz, 127 = ~3.0 Hz. Default: ~1 Hz.
+
+### Memory
+
+- **RAM:** 2 × 1024 × 2 bytes (delay buffers, power-of-two for bitmask wrapping) + LFO state ≈ 4.1 KB
+- **Flash:** 256 × 2 bytes (triangle LFO table) = 512 bytes
+
 ## Mixing and Normalization
 
 Per voice, the 7 oscillator outputs are summed per channel with per-oscillator gain (center vs. side), then normalized by the maximum effective gain:

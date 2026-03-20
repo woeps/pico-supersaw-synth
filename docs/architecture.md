@@ -7,7 +7,7 @@ The supersaw-midi-synth is a 4-voice polyphonic MIDI-controlled synthesizer runn
 ## Signal Flow
 
 ```
-MIDI IN (UART1 RX) → MIDI Parser → Multicore FIFO → Voice Allocator → 4× Supersaw Voices → Stereo Mix → I2S Audio Out → PCM5102A DAC
+MIDI IN (UART1 RX) → MIDI Parser → Multicore FIFO → Voice Allocator → 4× Supersaw Voices → Stereo Mix → Stereo Chorus → I2S Audio Out → PCM5102A DAC
 ```
 
 ## Dual-Core Layout
@@ -45,6 +45,7 @@ Core 1 pushes events, core 0 pops and dispatches them. The FIFO is lock-free and
 | Module | Files | Purpose |
 |--------|-------|---------|
 | **synth** | `src/synth/supersaw.h/.cpp` | 4-voice polyphonic supersaw with ADSR envelope |
+| **synth** | `src/synth/chorus.h/.cpp` | Stereo chorus effect (post-mix) |
 | **midi** | `src/midi/midi_input.h/.cpp` | UART MIDI parsing, event packing |
 | **audio** | `src/audio/audio_output.h/.cpp` | I2S output setup via pico_audio_i2s |
 | **config** | `src/config/pins.h` | Pin definitions |

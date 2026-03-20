@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include "config/pins.h"
+#include "synth/chorus.h"
 
 #define NUM_OSCILLATORS 7
 #define MAX_VOICES 4
@@ -72,6 +73,8 @@ struct Supersaw {
     // Q8.8 fixed-point: 256 = unity.
     uint16_t panL[NUM_OSCILLATORS];
     uint16_t panR[NUM_OSCILLATORS];
+
+    StereoChorus chorus;
 
     void init();
     void noteOn(uint8_t note, uint8_t velocity);
