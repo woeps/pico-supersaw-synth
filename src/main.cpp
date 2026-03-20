@@ -34,9 +34,7 @@ int main() {
     gpio_put(LED_BLUE_PIN, 0);
 
     supersaw.init();
-    printf("Initializing audio...\n");
     audio::audioInit();
-    printf("Audio initialized successfully\n");
 
     multicore_launch_core1(core1_entry);
     printf("Core 1 launched (MIDI input).\n");
@@ -48,13 +46,11 @@ int main() {
         midi::MidiEvent event;
         while (midi::midiEventPop(event)) {
             if (event.gate) {
-                printf("Note ON: %d\n", event.note);
                 supersaw.noteOn(event.note, 127);
                 gpio_put(LED_RED_PIN, 0);   // Turn LED green
                 gpio_put(LED_GREEN_PIN, 1);  // Turn LED green
                 gpio_put(LED_BLUE_PIN, 0);   // Turn LED green
             } else {
-                printf("Note OFF: %d\n", event.note);
                 supersaw.noteOff();
                 gpio_put(LED_RED_PIN, 0);   // Turn LED off
                 gpio_put(LED_GREEN_PIN, 0);  // Turn LED off
@@ -69,30 +65,6 @@ int main() {
             uint32_t numStereoSamples = buffer->max_sample_count;
 
             supersaw.render(samples, numStereoSamples);
-            
-            // Check if we're generating non-zero audio
-            static bool audioPrinted = false;
-            static uint32_t renderCount = 0;
-            renderCount++;
-            
-            if (!audioPrinted && supersaw.active) {
-                printf("Rendering audio: sample[0]=%d, active=%d, renderCount=%u\n", samples[0], supersaw.active, renderCount);
-                audioPrinted = true;
-            }
-            
-            // Test tone - generate a sine wave if no note is active
-            static uint32_t phase = 0;
-            if (!supersaw.active && renderCount % 1000 == 0) {
-                // Generate a 440Hz test tone for one buffer every 1000 buffers
-                for (uint32_t i = 0; i < numStereoSamples; i++) {
-                    phase += 4294967296 / 44100 * 440; // 440Hz increment
-                    int32_t sample = (int32_t)(phase >> 16) - 32768;
-                    sample = sample / 4; // Reduce volume
-                    samples[i * 2] = (int16_t)sample;
-                    samples[i * 2 + 1] = (int16_t)sample;
-                }
-                printf("Test tone generated at render count %u\n", renderCount);
-            }
 
             buffer->sample_count = numStereoSamples;
             give_audio_buffer(pool, buffer);

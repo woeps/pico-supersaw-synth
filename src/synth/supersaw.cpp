@@ -64,8 +64,6 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
 
     if (note > 127) return;
 
-    printf("Supersaw::noteOn - note=%d, baseInc=%u\n", note, midiNotePhaseInc[note]);
-    
     currentNote = note;
     uint32_t baseInc = midiNotePhaseInc[note];
 
@@ -74,7 +72,6 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
         phaseInc[i] = static_cast<uint32_t>(
             (static_cast<uint64_t>(baseInc) * detuneMultiplier[i]) >> 16
         );
-        printf("  osc[%d] phaseInc=%u\n", i, phaseInc[i]);
     }
 
     // Reset phases for a clean start
@@ -112,13 +109,9 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
             // Apply fade ramp
             if (fadeState == FadeState::FADE_IN) {
                 sample = (sample * static_cast<int32_t>(fadePos)) / FADE_SAMPLES;
-                if (fadePos == 0) {
-                    printf("Fade in starting: sample=%d, fadePos=%u\n", sample, fadePos);
-                }
                 fadePos++;
                 if (fadePos >= FADE_SAMPLES) {
                     fadeState = FadeState::NONE;
-                    printf("Fade in complete\n");
                 }
             } else if (fadeState == FadeState::FADE_OUT) {
                 sample = (sample * static_cast<int32_t>(FADE_SAMPLES - fadePos)) / FADE_SAMPLES;

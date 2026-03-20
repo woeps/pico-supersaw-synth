@@ -37,17 +37,13 @@ void audioInit() {
     );
 
     if (!outputFormat) {
-        printf("ERROR: audio_i2s_setup failed - check I2S wiring (pins 26,27,28)\n");
         panic("audio_i2s_setup failed");
     }
-    printf("I2S setup successful\n");
 
     bool connected = audio_i2s_connect(audioPool);
     if (!connected) {
-        printf("ERROR: audio_i2s_connect failed\n");
         panic("audio_i2s_connect failed");
     }
-    printf("Audio I2S connected\n");
 
     audio_i2s_set_enabled(true);
 }
