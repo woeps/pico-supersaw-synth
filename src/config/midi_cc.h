@@ -9,5 +9,6 @@
 #define CC_RELEASE 72
 #define CC_DETUNE  94
 #define CC_SPREAD  93
+#define CC_MIX     95
 
 #endif // MIDI_CC_H

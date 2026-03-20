@@ -38,6 +38,12 @@ struct Voice {
     uint32_t age;        // incremented each noteOn for voice-stealing
     Envelope env;
 
+    // DC-blocking high-pass filter state (per channel)
+    int32_t hpfStateL;
+    int32_t hpfStateR;
+    int32_t hpfPrevL;
+    int32_t hpfPrevR;
+
     void reset();
 };
 
@@ -51,8 +57,16 @@ struct Supersaw {
     uint32_t sustainLevel; // sustain target level (Q16.16)
     uint32_t releaseInc;   // level decrement per sample during release
 
-    uint8_t detuneAmount;  // 0–127 (CC value)
+    uint8_t detuneAmount;  // 0–255 (mapped through detuneCurve)
     uint8_t spread;        // 0–127 (CC value)
+    uint8_t mixAmount;     // 0–127 (CC value), 0 = center only, 127 = full supersaw
+
+    // Parameter smoothing (one-pole slew to prevent zipper noise)
+    int32_t currentMix;        // smoothed side gain, Q8.8 (0–256)
+    int32_t targetMix;         // target side gain, Q8.8
+    int32_t currentDetune;     // smoothed detune amount, Q8.8
+    int32_t targetDetune;      // target detune amount, Q8.8
+    uint8_t detuneSmoothCounter; // sample counter for periodic detune recalc
 
     // Per-oscillator stereo pan gains, derived from spread.
     // Q8.8 fixed-point: 256 = unity.

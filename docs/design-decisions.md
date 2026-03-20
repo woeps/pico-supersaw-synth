@@ -41,7 +41,7 @@ This replaces the PoC's simple 5 ms fade ramp.
 
 ## Voice Allocation & Stealing
 
-With 4-voice polyphony, incoming notes are assigned to free voices. If all voices are active, the oldest voice is stolen. Each voice carries a monotonic age counter to determine the steal target. Retriggering an already-playing note resets its phase and restarts the envelope from the current level.
+With 4-voice polyphony, incoming notes are assigned to free voices. If all voices are active, the oldest voice is stolen. Each voice carries a monotonic age counter to determine the steal target. Retriggering an already-playing note restarts the envelope from the current level. Oscillator phases are never reset — they free-run continuously for organic variation between note attacks.
 
 ## Sample Rate: 44100 Hz
 
@@ -53,7 +53,7 @@ The 7 oscillators are assigned fixed pan positions: {−3, −2, −1, 0, +1, +2
 
 ## Runtime Detune
 
-Detune is no longer hardcoded. The `detune` parameter (CC 94) interpolates each oscillator's frequency multiplier between unity (no detune) and a maximum offset of 0.5 semitones. Precomputed max-offset values per oscillator (`detuneMaxOffset[]`) keep the per-noteOn cost to 7 integer multiplies.
+The `detune` parameter (CC 94) is mapped through a non-linear piecewise curve (128-entry lookup table) before being applied. This gives fine control at low detune values and an exponential ramp at high values, matching the JP-8000's behavior. The curve output (0–255) interpolates each oscillator's frequency multiplier between unity and its asymmetric max-offset. The asymmetric coefficients are derived from the JP-8000 firmware — positive/negative pairs are intentionally unequal to prevent perfect cancellation and produce richer beating.
 
 ## MIDI CC Configuration
 
@@ -65,11 +65,27 @@ All CC number assignments are centralized in `src/config/midi_cc.h` as `#define`
 | 75 | Decay | 0–127 → ~2 ms – 2 s |
 | 79 | Sustain | 0–127 → 0–100% level |
 | 72 | Release | 0–127 → ~2 ms – 2 s |
-| 94 | Detune | 0–127 → 0–0.5 semitones |
+| 94 | Detune | 0–127 → non-linear curve, 0–max detune |
 | 93 | Spread | 0–127 → mono to full stereo |
+| 95 | Mix | 0–127 → center only to full supersaw |
 
-## Band-Limited Wavetable Synthesis
+## Hybrid Waveform Generation
 
-A naive sawtooth waveform has infinite harmonics that extend beyond the Nyquist frequency, causing aliasing (audible as harsh artifacts at high frequencies). Instead of oversampling or complex anti-aliasing filtering, this implementation uses pre-computed band-limited wavetables.
+A hybrid approach balances JP-8000 authenticity with practical constraints at 44.1 kHz:
 
-11 octave bands cover MIDI notes 0–127. Each wavetable is generated via additive synthesis with harmonics limited to below 22050 Hz for its frequency range. At render time, linear interpolation between table samples provides smooth playback. The tables are stored in flash (not RAM), using ~44 KB of the 2 MB available.
+- **Notes below C5 (MIDI 0–71):** Naive sawtooth from the raw phase accumulator. Aliasing harmonics land above ~16 kHz and add the characteristic bright "air" of the JP-8000. This path is also cheaper than wavetable lookup.
+- **Notes C5 and above (MIDI 72–127):** Band-limited wavetables prevent harsh audible aliasing. 11 octave bands generated via additive synthesis with harmonics limited below Nyquist. Tables stored in flash (~44 KB).
+
+The JP-8000 uses naive saws at 88.2 kHz, pushing aliasing further above the audible range. At 44.1 kHz, the hybrid threshold at C5 is a practical compromise.
+
+## JP-8000 Emulation
+
+Several design choices are specifically modeled after the Roland JP-8000 supersaw oscillator:
+
+- **Free-running phase:** Oscillator phases are never reset on note-on, producing organic variation between attacks.
+- **Asymmetric detune:** Coefficients derived from JP firmware. Unequal positive/negative pairs prevent periodic beating.
+- **Non-linear detune curve:** Piecewise-linear LUT gives fine control at low settings, exponential ramp at high values.
+- **Mix control:** Center oscillator at fixed ~0.195 gain, sides controlled by CC 95. Matches the JP's two primary timbral controls (detune + mix).
+- **Parameter smoothing:** One-pole slew on mix and detune prevents zipper noise during CC sweeps (~1 ms time constant).
+- **DC-blocking HPF:** Single-pole high-pass filter (~20 Hz) per voice removes DC offset and sub-fundamental energy.
+- **Naive saw character:** Raw phase accumulator for low notes adds the bright, shimmery aliasing characteristic of the JP-8000.

@@ -45,11 +45,27 @@ const uint32_t midiNotePhaseInc[128] = {
     1027294023, 1088380105, 1153098554, 1221665362,
 };
 
-// Per-oscillator offsets at maximum detune (0.5 semitones).
-// multiplier_max[i] − 65536, where multiplier_max = 2^(offset_i * 0.5/12) in Q16.16.
-// Oscillator offsets: {−1, −2/3, −1/3, 0, +1/3, +2/3, +1}
+// JP-8000 asymmetric detune coefficients (Q16.16 offset from unity).
+// Derived from JP firmware coefficients {−720, −412, −128, 0, +128, +408, +704}.
+// Positive/negative pairs are intentionally unequal to prevent perfect
+// cancellation and produce richer, less periodic beating.
 static const int16_t detuneMaxOffset[NUM_OSCILLATORS] = {
-    -1866, -1249, -627, 0, 633, 1271, 1920,
+    -10667, -6108, -1893, 0, +1893, +6048, +10430,
+};
+
+// JP-8000 piecewise-linear detune curve.
+// Fine control at low CC values, exponential ramp at high values.
+// CC 0-63: +1 every 2 steps, CC 64-80: +1/step, CC 81-120: +2/step,
+// CC 121-123: +8/step, CC 124: +16, CC 125: +32, CC 126-127: +96/clamped.
+static const uint8_t detuneCurve[128] = {
+      1,   1,   2,   2,   3,   3,   4,   4,   5,   5,   6,   6,   7,   7,   8,   8,
+      9,   9,  10,  10,  11,  11,  12,  12,  13,  13,  14,  14,  15,  15,  16,  16,
+     17,  17,  18,  18,  19,  19,  20,  20,  21,  21,  22,  22,  23,  23,  24,  24,
+     25,  25,  26,  26,  27,  27,  28,  28,  29,  29,  30,  30,  31,  31,  32,  32,
+     33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+     49,  51,  53,  55,  57,  59,  61,  63,  65,  67,  69,  71,  73,  75,  77,  79,
+     81,  83,  85,  87,  89,  91,  93,  95,  97,  99, 101, 103, 105, 107, 109, 111,
+    113, 115, 117, 119, 121, 123, 125, 127, 129, 137, 145, 153, 169, 201, 255, 255,
 };
 
 // Stereo pan offsets per oscillator (−3 … +3)
@@ -57,6 +73,10 @@ static const int8_t oscPanOffset[NUM_OSCILLATORS] = {-3, -2, -1, 0, 1, 2, 3};
 
 // Envelope max level (Q16.16 stored in uint32_t)
 static constexpr uint32_t ENV_MAX = 0xFFFF0000u;
+
+// DC-blocking high-pass filter coefficient.
+// α ≈ 0.9986 in Q16 → cutoff ~20 Hz @ 44.1 kHz.
+static constexpr int32_t HPF_ALPHA = 65444;
 
 // ─── Envelope ───────────────────────────────────────────────────────────────
 
@@ -110,13 +130,15 @@ uint32_t Envelope::tick(uint32_t attackInc, uint32_t decayInc,
 // ─── Voice ──────────────────────────────────────────────────────────────────
 
 void Voice::reset() {
-    memset(phase, 0, sizeof(phase));
+    // Phase is intentionally NOT reset — free-running oscillators
+    // produce organic variation between note triggers (JP-8000 behavior).
     memset(phaseInc, 0, sizeof(phaseInc));
     note = 0;
     active = false;
     age = 0;
     env.stage = EnvStage::IDLE;
     env.level = 0;
+    hpfStateL = hpfStateR = hpfPrevL = hpfPrevR = 0;
 }
 
 // ─── Supersaw ───────────────────────────────────────────────────────────────
@@ -142,8 +164,15 @@ void Supersaw::init() {
     sustainLevel = ENV_MAX;          // full sustain
     releaseInc  = ccToEnvInc(10);   // ~15 ms
 
-    detuneAmount = 76;  // ~0.3 semitones (matches PoC)
+    detuneAmount = detuneCurve[76];  // CC 76 through JP curve
     spread = 0;         // mono (matches PoC)
+    mixAmount = 127;    // full supersaw (all side oscillators at max)
+
+    // Initialize parameter smoothing
+    targetMix = currentMix = 256;  // Q8.8: 256 = full side gain
+    targetDetune = currentDetune = static_cast<int32_t>(detuneAmount) << 8;
+    detuneSmoothCounter = 0;
+
     recalcSpread();
 }
 
@@ -154,7 +183,6 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
     // Retrigger if this note is already active
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].active && voices[i].note == note) {
-            memset(voices[i].phase, 0, sizeof(voices[i].phase));
             voices[i].age = nextAge++;
             voices[i].env.gate(true);
             updateDetuneForVoice(voices[i]);
@@ -207,13 +235,12 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
     } else if (cc == CC_RELEASE) {
         releaseInc = ccToEnvInc(value);
     } else if (cc == CC_DETUNE) {
-        detuneAmount = value;
-        for (int i = 0; i < MAX_VOICES; i++) {
-            if (voices[i].active) updateDetuneForVoice(voices[i]);
-        }
+        targetDetune = static_cast<int32_t>(detuneCurve[value]) << 8;
     } else if (cc == CC_SPREAD) {
         spread = value;
         recalcSpread();
+    } else if (cc == CC_MIX) {
+        targetMix = (static_cast<int32_t>(value) * 256) / 127;
     }
 }
 
@@ -221,7 +248,7 @@ void Supersaw::updateDetuneForVoice(Voice& v) {
     uint32_t baseInc = midiNotePhaseInc[v.note];
     for (int i = 0; i < NUM_OSCILLATORS; i++) {
         // Interpolate between unity (65536) and max-detune multiplier
-        int32_t offset = (static_cast<int32_t>(detuneMaxOffset[i]) * detuneAmount) / 127;
+        int32_t offset = (static_cast<int32_t>(detuneMaxOffset[i]) * detuneAmount) / 255;
         uint32_t multiplier = static_cast<uint32_t>(65536 + offset);
         v.phaseInc[i] = static_cast<uint32_t>(
             (static_cast<uint64_t>(baseInc) * multiplier) >> 16
@@ -251,6 +278,19 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         int32_t sampleL = 0;
         int32_t sampleR = 0;
 
+        // Parameter smoothing: slew mix and detune toward targets
+        currentMix += (targetMix - currentMix) >> 6;
+        currentDetune += (targetDetune - currentDetune) >> 6;
+
+        // Periodically recalculate phase increments from smoothed detune
+        if (++detuneSmoothCounter >= 32) {
+            detuneSmoothCounter = 0;
+            detuneAmount = static_cast<uint8_t>(currentDetune >> 8);
+            for (int v = 0; v < MAX_VOICES; v++) {
+                if (voices[v].active) updateDetuneForVoice(voices[v]);
+            }
+        }
+
         for (int v = 0; v < MAX_VOICES; v++) {
             Voice& voice = voices[v];
             if (!voice.active) continue;
@@ -265,23 +305,50 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
             int32_t voiceL = 0;
             int32_t voiceR = 0;
 
-            const int16_t* table = sawWavetable[noteToOctaveBand[voice.note]];
+            // JP-8000 mix: center osc (index 3) at fixed gain ~0.195,
+            // side oscillators scaled by smoothed mix.
+            static constexpr int32_t CENTER_GAIN = 50; // 50/256 ≈ 0.195 in Q8.8
+            int32_t sideGain = currentMix;
+
             for (int osc = 0; osc < NUM_OSCILLATORS; osc++) {
                 voice.phase[osc] += voice.phaseInc[osc];
-                // Wavetable lookup with linear interpolation
-                uint32_t idx = voice.phase[osc] >> 21;
-                uint32_t frac = (voice.phase[osc] >> 5) & 0xFFFF;
-                int16_t s0 = table[idx];
-                int16_t s1 = table[(idx + 1) & (WAVETABLE_SIZE - 1)];
-                int32_t saw = s0 + ((static_cast<int32_t>(s1 - s0) * static_cast<int32_t>(frac)) >> 16);
-                voiceL += (saw * static_cast<int32_t>(panL[osc])) >> 8;
-                voiceR += (saw * static_cast<int32_t>(panR[osc])) >> 8;
+
+                int32_t saw;
+                if (voice.note < 72) {
+                    // Naive saw: raw phase accumulator for JP-8000 aliasing character.
+                    // At 44.1 kHz, aliasing for notes below C5 lands above ~16 kHz.
+                    saw = static_cast<int32_t>(voice.phase[osc] >> 17) - 16384;
+                } else {
+                    // Band-limited wavetable for high notes to avoid harsh aliasing
+                    const int16_t* table = sawWavetable[noteToOctaveBand[voice.note]];
+                    uint32_t idx = voice.phase[osc] >> 21;
+                    uint32_t frac = (voice.phase[osc] >> 5) & 0xFFFF;
+                    int16_t s0 = table[idx];
+                    int16_t s1 = table[(idx + 1) & (WAVETABLE_SIZE - 1)];
+                    saw = s0 + ((static_cast<int32_t>(s1 - s0) * static_cast<int32_t>(frac)) >> 16);
+                }
+
+                int32_t gain = (osc == 3) ? CENTER_GAIN : sideGain;
+                voiceL += (saw * gain * static_cast<int32_t>(panL[osc])) >> 16;
+                voiceR += (saw * gain * static_cast<int32_t>(panR[osc])) >> 16;
             }
 
-            // Normalize: divide by NUM_OSCILLATORS (7)
-            // (9362/65536 ≈ 1/7)
-            voiceL = (voiceL * 9362) >> 16;
-            voiceR = (voiceR * 9362) >> 16;
+            // Normalize by max effective gain (mix=127):
+            // center=50/256 + 6×sides=256/256 → ~6.195× saw amplitude.
+            // ÷6.195 ≈ ×10579 >> 16.
+            voiceL = (voiceL * 10579) >> 16;
+            voiceR = (voiceR * 10579) >> 16;
+
+            // DC-blocking high-pass filter (removes DC offset and sub-fundamental energy)
+            voice.hpfStateL = static_cast<int32_t>(
+                (static_cast<int64_t>(HPF_ALPHA) * (voice.hpfStateL + voiceL - voice.hpfPrevL)) >> 16);
+            voice.hpfPrevL = voiceL;
+            voiceL = voice.hpfStateL;
+
+            voice.hpfStateR = static_cast<int32_t>(
+                (static_cast<int64_t>(HPF_ALPHA) * (voice.hpfStateR + voiceR - voice.hpfPrevR)) >> 16);
+            voice.hpfPrevR = voiceR;
+            voiceR = voice.hpfStateR;
 
             // Apply envelope: envLevel is 0..0xFFFF0000, use upper 16 bits as multiplier
             int32_t envMul = static_cast<int32_t>(envLevel >> 16);

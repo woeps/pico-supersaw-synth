@@ -21,7 +21,8 @@ The only supported waveform is a supersaw, targeting up to 4 voices.
 ### Parameters
 
 - **Envelope**: attack, decay, sustain, release
-- **Detune**
+- **Detune** (non-linear JP-8000 curve)
+- **Mix** (center vs. side oscillator balance)
 - **Spread**
 
 ## Documentation
