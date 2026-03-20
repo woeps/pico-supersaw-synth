@@ -9,4 +9,3 @@
   * [SuperSaw Algorithm](supersaw.md)
 * [Documentation](#documentation)
   * [Docsify Setup](DOCSIFY.md)
-  * [GitHub Pages Setup](GITHUB-PAGES.md)
