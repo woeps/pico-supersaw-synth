@@ -16,7 +16,7 @@ Osc 5: center + 2/3 × detune
 Osc 6: center + 3/3 × detune
 ```
 
-The maximum detune is hardcoded at 0.3 semitones. The 6 outer oscillators are spaced evenly around the center.
+The detune amount is controlled via MIDI CC 94 (0–0.5 semitones). The 6 outer oscillators are spaced evenly around the center. At CC 0 all oscillators play at the same frequency; at CC 127 the outermost oscillators are ±0.5 semitones from center.
 
 ## Phase Accumulator
 
@@ -60,7 +60,7 @@ The phase increment determines the oscillator's frequency:
 phaseIncrement = (frequency / sampleRate) × 2^32
 ```
 
-A precomputed lookup table stores phase increments for all 128 MIDI notes. Detune is applied by multiplying the base phase increment with fixed-point detune multipliers (Q16.16 format).
+A precomputed lookup table stores phase increments for all 128 MIDI notes. Detune is applied by interpolating between unity (65536) and a precomputed max-offset per oscillator (`detuneMaxOffset[]`), scaled by the current detune CC value. The resulting multiplier is applied via Q16.16 fixed-point multiply.
 
 ## MIDI Note to Frequency
 
@@ -70,9 +70,20 @@ Standard tuning: A4 (MIDI note 69) = 440 Hz.
 frequency = 440 × 2^((note - 69) / 12)
 ```
 
+## Stereo Spread
+
+The 7 oscillators have fixed pan offsets: {−3, −2, −1, 0, +1, +2, +3}. The spread parameter (CC 93) scales these into L/R gain pairs (Q8.8 fixed-point). At spread = 0 all oscillators output equally to both channels (mono). At spread = 127 the outermost oscillators are hard-panned.
+
+Per-oscillator panning is applied during rendering:
+
+```
+voiceL += (saw × panL[osc]) >> 8
+voiceR += (saw × panR[osc]) >> 8
+```
+
 ## Mixing and Normalization
 
-The 7 oscillator outputs are summed and divided by 7 to prevent clipping. Division by 7 is approximated with a fixed-point multiply:
+Per voice, the 7 oscillator outputs are summed per channel and divided by 7:
 
 ```
 normalized = (sum × 9362) >> 16
@@ -80,6 +91,17 @@ normalized = (sum × 9362) >> 16
 
 Where 9362/65536 ≈ 1/7 ≈ 0.1429.
 
-## Click Avoidance
+After applying the ADSR envelope, all 4 voices are summed and divided by 4 (`>> 2`) to prevent clipping at full polyphony.
 
-A linear fade ramp (~5ms / 220 samples at 44.1kHz) is applied on note on (fade-in) and note off (fade-out) to avoid audible clicks from abrupt amplitude changes.
+## ADSR Envelope
+
+Each voice has an independent ADSR envelope that replaces the PoC's simple fade ramp. The envelope level is a `uint32_t` accumulator (0 to `0xFFFF0000`). Per-sample increments are precomputed from CC values (attack: CC 73, decay: CC 75, sustain: CC 79, release: CC 72) using a quadratic time mapping.
+
+The upper 16 bits of the level are used as a multiplier:
+
+```
+envMul = envLevel >> 16
+voiceL = (voiceL × envMul) >> 16
+```
+
+When a voice's envelope reaches IDLE after release, the voice is marked inactive and freed for reuse.

@@ -45,17 +45,28 @@ int main() {
         // Process all pending MIDI events from core 1
         midi::MidiEvent event;
         while (midi::midiEventPop(event)) {
-            if (event.gate) {
-                supersaw.noteOn(event.note, 127);
-                gpio_put(LED_RED_PIN, 0);   // Turn LED green
-                gpio_put(LED_GREEN_PIN, 1);  // Turn LED green
-                gpio_put(LED_BLUE_PIN, 0);   // Turn LED green
-            } else {
-                supersaw.noteOff();
-                gpio_put(LED_RED_PIN, 0);   // Turn LED off
-                gpio_put(LED_GREEN_PIN, 0);  // Turn LED off
-                gpio_put(LED_BLUE_PIN, 0);   // Turn LED off
+            switch (event.type) {
+                case midi::MidiEventType::NOTE_ON:
+                    supersaw.noteOn(event.param1, event.param2);
+                    break;
+                case midi::MidiEventType::NOTE_OFF:
+                    supersaw.noteOff(event.param1);
+                    break;
+                case midi::MidiEventType::CC:
+                    supersaw.setCC(event.param1, event.param2);
+                    break;
             }
+        }
+
+        // LED: green while any voice is active
+        if (supersaw.anyVoiceActive()) {
+            gpio_put(LED_RED_PIN, 0);
+            gpio_put(LED_GREEN_PIN, 1);
+            gpio_put(LED_BLUE_PIN, 0);
+        } else {
+            gpio_put(LED_RED_PIN, 0);
+            gpio_put(LED_GREEN_PIN, 0);
+            gpio_put(LED_BLUE_PIN, 0);
         }
 
         // Get an audio buffer from the pool (blocks until available)

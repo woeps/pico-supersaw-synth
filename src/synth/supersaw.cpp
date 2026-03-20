@@ -1,5 +1,6 @@
 #include "synth/supersaw.h"
 #include "synth/saw_wavetable.h"
+#include "config/midi_cc.h"
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
@@ -44,99 +45,265 @@ const uint32_t midiNotePhaseInc[128] = {
     1027294023, 1088380105, 1153098554, 1221665362,
 };
 
-// Detune multipliers in Q16.16 fixed-point.
-// Oscillator order: [-3/3, -2/3, -1/3, 0, +1/3, +2/3, +3/3] * 0.3 semitones
-// multiplier = 2^(offset * 0.3 / 12), stored as (multiplier * 65536)
-const uint32_t detuneMultiplier[NUM_OSCILLATORS] = {
-    64410, 64783, 65159, 65536, 65916, 66297, 66682,
+// Per-oscillator offsets at maximum detune (0.5 semitones).
+// multiplier_max[i] − 65536, where multiplier_max = 2^(offset_i * 0.5/12) in Q16.16.
+// Oscillator offsets: {−1, −2/3, −1/3, 0, +1/3, +2/3, +1}
+static const int16_t detuneMaxOffset[NUM_OSCILLATORS] = {
+    -1866, -1249, -627, 0, 633, 1271, 1920,
 };
 
-void Supersaw::init() {
+// Stereo pan offsets per oscillator (−3 … +3)
+static const int8_t oscPanOffset[NUM_OSCILLATORS] = {-3, -2, -1, 0, 1, 2, 3};
+
+// Envelope max level (Q16.16 stored in uint32_t)
+static constexpr uint32_t ENV_MAX = 0xFFFF0000u;
+
+// ─── Envelope ───────────────────────────────────────────────────────────────
+
+void Envelope::gate(bool on) {
+    if (on) {
+        stage = EnvStage::ATTACK;
+    } else {
+        if (stage != EnvStage::IDLE) {
+            stage = EnvStage::RELEASE;
+        }
+    }
+}
+
+uint32_t Envelope::tick(uint32_t attackInc, uint32_t decayInc,
+                        uint32_t sustainLevel, uint32_t releaseInc) {
+    switch (stage) {
+        case EnvStage::ATTACK:
+            if (level <= ENV_MAX - attackInc) {
+                level += attackInc;
+            } else {
+                level = ENV_MAX;
+                stage = EnvStage::DECAY;
+            }
+            break;
+        case EnvStage::DECAY:
+            if (level > sustainLevel && (level - sustainLevel) > decayInc) {
+                level -= decayInc;
+            } else {
+                level = sustainLevel;
+                stage = EnvStage::SUSTAIN;
+            }
+            break;
+        case EnvStage::SUSTAIN:
+            level = sustainLevel;
+            break;
+        case EnvStage::RELEASE:
+            if (level > releaseInc) {
+                level -= releaseInc;
+            } else {
+                level = 0;
+                stage = EnvStage::IDLE;
+            }
+            break;
+        case EnvStage::IDLE:
+            level = 0;
+            break;
+    }
+    return level;
+}
+
+// ─── Voice ──────────────────────────────────────────────────────────────────
+
+void Voice::reset() {
     memset(phase, 0, sizeof(phase));
     memset(phaseInc, 0, sizeof(phaseInc));
+    note = 0;
     active = false;
-    currentNote = 0;
-    fadeState = FadeState::NONE;
-    fadePos = 0;
+    age = 0;
+    env.stage = EnvStage::IDLE;
+    env.level = 0;
+}
+
+// ─── Supersaw ───────────────────────────────────────────────────────────────
+
+uint32_t Supersaw::ccToEnvInc(uint8_t cc) {
+    // Quadratic mapping: CC 0 → ~2 ms, CC 127 → ~2000 ms
+    uint32_t c = cc;
+    uint32_t time_ms = 2 + (c * c * 1998) / 16129;
+    uint32_t samples = (static_cast<uint32_t>(SAMPLE_RATE) * time_ms) / 1000;
+    if (samples < 1) samples = 1;
+    return ENV_MAX / samples;
+}
+
+void Supersaw::init() {
+    for (int i = 0; i < MAX_VOICES; i++) {
+        voices[i].reset();
+    }
+    nextAge = 0;
+
+    // Default ADSR: near-instant attack, no decay, full sustain, short release
+    attackInc   = ccToEnvInc(0);    // ~2 ms
+    decayInc    = ccToEnvInc(0);    // ~2 ms
+    sustainLevel = ENV_MAX;          // full sustain
+    releaseInc  = ccToEnvInc(10);   // ~15 ms
+
+    detuneAmount = 76;  // ~0.3 semitones (matches PoC)
+    spread = 0;         // mono (matches PoC)
+    recalcSpread();
 }
 
 void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
-    (void)velocity; // unused in PoC
-
+    (void)velocity;
     if (note > 127) return;
 
-    currentNote = note;
-    uint32_t baseInc = midiNotePhaseInc[note];
-
-    // Apply detune multipliers (Q16.16 fixed-point multiply)
-    for (int i = 0; i < NUM_OSCILLATORS; i++) {
-        phaseInc[i] = static_cast<uint32_t>(
-            (static_cast<uint64_t>(baseInc) * detuneMultiplier[i]) >> 16
-        );
+    // Retrigger if this note is already active
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].active && voices[i].note == note) {
+            memset(voices[i].phase, 0, sizeof(voices[i].phase));
+            voices[i].age = nextAge++;
+            voices[i].env.gate(true);
+            updateDetuneForVoice(voices[i]);
+            return;
+        }
     }
 
-    // Reset phases for a clean start
-    memset(phase, 0, sizeof(phase));
+    // Find a free voice, or steal the oldest
+    int idx = 0;
+    uint32_t oldestAge = UINT32_MAX;
+    bool found = false;
 
-    active = true;
-    fadeState = FadeState::FADE_IN;
-    fadePos = 0;
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (!voices[i].active) {
+            idx = i;
+            found = true;
+            break;
+        }
+        if (voices[i].age < oldestAge) {
+            oldestAge = voices[i].age;
+            idx = i;
+        }
+    }
+
+    (void)found;
+    voices[idx].reset();
+    voices[idx].note = note;
+    voices[idx].active = true;
+    voices[idx].age = nextAge++;
+    voices[idx].env.gate(true);
+    updateDetuneForVoice(voices[idx]);
 }
 
-void Supersaw::noteOff() {
-    if (!active) return;
-    fadeState = FadeState::FADE_OUT;
-    fadePos = 0;
+void Supersaw::noteOff(uint8_t note) {
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].active && voices[i].note == note) {
+            voices[i].env.gate(false);
+            break;
+        }
+    }
+}
+
+void Supersaw::setCC(uint8_t cc, uint8_t value) {
+    if (cc == CC_ATTACK) {
+        attackInc = ccToEnvInc(value);
+    } else if (cc == CC_DECAY) {
+        decayInc = ccToEnvInc(value);
+    } else if (cc == CC_SUSTAIN) {
+        sustainLevel = (static_cast<uint32_t>(value) * 65535u / 127u) << 16;
+    } else if (cc == CC_RELEASE) {
+        releaseInc = ccToEnvInc(value);
+    } else if (cc == CC_DETUNE) {
+        detuneAmount = value;
+        for (int i = 0; i < MAX_VOICES; i++) {
+            if (voices[i].active) updateDetuneForVoice(voices[i]);
+        }
+    } else if (cc == CC_SPREAD) {
+        spread = value;
+        recalcSpread();
+    }
+}
+
+void Supersaw::updateDetuneForVoice(Voice& v) {
+    uint32_t baseInc = midiNotePhaseInc[v.note];
+    for (int i = 0; i < NUM_OSCILLATORS; i++) {
+        // Interpolate between unity (65536) and max-detune multiplier
+        int32_t offset = (static_cast<int32_t>(detuneMaxOffset[i]) * detuneAmount) / 127;
+        uint32_t multiplier = static_cast<uint32_t>(65536 + offset);
+        v.phaseInc[i] = static_cast<uint32_t>(
+            (static_cast<uint64_t>(baseInc) * multiplier) >> 16
+        );
+    }
+}
+
+void Supersaw::recalcSpread() {
+    // At spread=0: panL = panR = 256 (unity, mono).
+    // At spread=127: outermost oscillators hard-panned (panL=384/panR=128 or vice versa).
+    for (int i = 0; i < NUM_OSCILLATORS; i++) {
+        int32_t pan = (static_cast<int32_t>(oscPanOffset[i]) * spread * 128) / (3 * 127);
+        panL[i] = static_cast<uint16_t>(256 - pan);
+        panR[i] = static_cast<uint16_t>(256 + pan);
+    }
+}
+
+bool Supersaw::anyVoiceActive() const {
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].active) return true;
+    }
+    return false;
 }
 
 void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
     for (size_t i = 0; i < numStereoSamples; i++) {
-        int32_t sample = 0;
+        int32_t sampleL = 0;
+        int32_t sampleR = 0;
 
-        if (active) {
-            // Sum 7 band-limited sawtooth oscillators via wavetable lookup
-            const int16_t* table = sawWavetable[noteToOctaveBand[currentNote]];
+        for (int v = 0; v < MAX_VOICES; v++) {
+            Voice& voice = voices[v];
+            if (!voice.active) continue;
+
+            uint32_t envLevel = voice.env.tick(attackInc, decayInc,
+                                                sustainLevel, releaseInc);
+            if (voice.env.stage == EnvStage::IDLE) {
+                voice.active = false;
+                continue;
+            }
+
+            int32_t voiceL = 0;
+            int32_t voiceR = 0;
+
+            const int16_t* table = sawWavetable[noteToOctaveBand[voice.note]];
             for (int osc = 0; osc < NUM_OSCILLATORS; osc++) {
-                phase[osc] += phaseInc[osc];
+                voice.phase[osc] += voice.phaseInc[osc];
                 // Wavetable lookup with linear interpolation
-                uint32_t idx = phase[osc] >> 21;              // top 11 bits → table index (0..2047)
-                uint32_t frac = (phase[osc] >> 5) & 0xFFFF;   // next 16 bits → fractional part
+                uint32_t idx = voice.phase[osc] >> 21;
+                uint32_t frac = (voice.phase[osc] >> 5) & 0xFFFF;
                 int16_t s0 = table[idx];
                 int16_t s1 = table[(idx + 1) & (WAVETABLE_SIZE - 1)];
                 int32_t saw = s0 + ((static_cast<int32_t>(s1 - s0) * static_cast<int32_t>(frac)) >> 16);
-                sample += saw;
+                voiceL += (saw * static_cast<int32_t>(panL[osc])) >> 8;
+                voiceR += (saw * static_cast<int32_t>(panR[osc])) >> 8;
             }
 
             // Normalize: divide by NUM_OSCILLATORS (7)
-            // Use approximation: multiply by 9362 and shift right by 16
-            // (9362/65536 ≈ 1/7 = 0.142857)
-            sample = (sample * 9362) >> 16;
+            // (9362/65536 ≈ 1/7)
+            voiceL = (voiceL * 9362) >> 16;
+            voiceR = (voiceR * 9362) >> 16;
 
-            // Apply fade ramp
-            if (fadeState == FadeState::FADE_IN) {
-                sample = (sample * static_cast<int32_t>(fadePos)) / FADE_SAMPLES;
-                fadePos++;
-                if (fadePos >= FADE_SAMPLES) {
-                    fadeState = FadeState::NONE;
-                }
-            } else if (fadeState == FadeState::FADE_OUT) {
-                sample = (sample * static_cast<int32_t>(FADE_SAMPLES - fadePos)) / FADE_SAMPLES;
-                fadePos++;
-                if (fadePos >= FADE_SAMPLES) {
-                    fadeState = FadeState::NONE;
-                    active = false;
-                    sample = 0;
-                }
-            }
+            // Apply envelope: envLevel is 0..0xFFFF0000, use upper 16 bits as multiplier
+            int32_t envMul = static_cast<int32_t>(envLevel >> 16);
+            voiceL = (voiceL * envMul) >> 16;
+            voiceR = (voiceR * envMul) >> 16;
+
+            sampleL += voiceL;
+            sampleR += voiceR;
         }
 
-        // Clamp to int16_t range
-        if (sample > 32767) sample = 32767;
-        if (sample < -32768) sample = -32768;
+        // Divide by MAX_VOICES to prevent clipping with full polyphony
+        sampleL >>= 2;
+        sampleR >>= 2;
 
-        // Write mono sample to both L and R channels (interleaved stereo)
-        buffer[i * 2]     = static_cast<int16_t>(sample);
-        buffer[i * 2 + 1] = static_cast<int16_t>(sample);
+        // Clamp to int16_t range
+        if (sampleL > 32767) sampleL = 32767;
+        if (sampleL < -32768) sampleL = -32768;
+        if (sampleR > 32767) sampleR = 32767;
+        if (sampleR < -32768) sampleR = -32768;
+
+        buffer[i * 2]     = static_cast<int16_t>(sampleL);
+        buffer[i * 2 + 1] = static_cast<int16_t>(sampleR);
     }
 }
 

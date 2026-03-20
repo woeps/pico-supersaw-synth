@@ -42,15 +42,35 @@ Simple midi controlled supersaw synthesizer.
 ### 2. Simple midi controlled supersaw synthesizer
 
 - Build on top of the proof of concept.
-- Add support for multiple voices.
+- Add support for multiple voices. (up to 4)
+- Add support for more parameters.
 - Add envelope.
 - Add support for more midi messages to control all parameters.
-- Add support for more parameters.
 
-### 3. Final supersaw-midi-synth
+### 3. More parameters
 
-- Add hardware controls for every parameter.
+- Add mix parameter
+    - control the volume ratio of the several saw-waves between the one in the harmonic center (pitch according to midi note on) and the others
 - Try to add a filter for the output signal. - if performance and rp2040 capabilities allow
     - lowpass, highpass, bandpass
     - supporting cutoff frequency and resonance parameters
+    - support keytracking
+
+### 4. hardware control
+
 - Add support for more midi messages.
+- add a hardware interface to control parameters
+
+### 5. Fine-tune sound to get closer to jp8000 sound
+
+TODO: research the original algorithm more deeply and try to adapt the current implementation to get closer to the original sound.
+
+- randomize phase of each saw wave
+
+### 6. effects
+
+Experiment and try to see what is possible to implement on the rp2040:
+
+- chorus
+- delay
+- reverb

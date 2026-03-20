@@ -9,7 +9,7 @@ All render-loop math uses:
 - **Q16.16 fixed-point** for detune multipliers
 - **Integer multiply + shift** for division by 7
 
-Float is only used during `noteOn()` (infrequent) for computing phase increments from the lookup table.
+Float is never used. Phase increments come from a precomputed lookup table, detune multipliers are interpolated at `noteOn()` time using integer math, and the ADSR envelope uses a full-range `uint32_t` accumulator.
 
 ## pico_audio_i2s (pico-extras)
 
@@ -25,23 +25,48 @@ The alternative (raw PIO I2S) would give more control but significantly more cod
 - **Core 0**: Audio rendering (time-critical, blocks on DMA buffer availability)
 - **Core 1**: MIDI polling (latency-sensitive, must not be blocked by audio)
 
-This prevents MIDI input from being starved when audio rendering is busy waiting for buffers. The inter-core communication is a simple volatile flag pattern (single-producer, single-consumer) which avoids the overhead of mutexes or queues.
+This prevents MIDI input from being starved when audio rendering is busy waiting for buffers. Inter-core communication uses the RP2040's hardware multicore FIFO — a lock-free, single-producer/single-consumer queue that avoids the overhead of mutexes. Each MIDI event is packed into a single 32-bit FIFO word.
 
-## 7 Oscillators
+## 7 Oscillators × 4 Voices
 
-The classic Roland JP-8000 supersaw uses 7 oscillators. While fewer (3 or 5) would be lighter on the CPU, 7 gives the characteristic thick sound. At 44100 Hz with integer math, the RP2040 at 125 MHz has sufficient headroom for 7 oscillators in a single voice.
+The classic Roland JP-8000 supersaw uses 7 oscillators. With 4-voice polyphony, up to 28 oscillators run simultaneously. At 44100 Hz with integer math, the RP2040 at 125 MHz has sufficient headroom: each sample requires ~28 wavetable lookups plus envelope and panning, well within the ~2835 cycles available per sample.
 
-## No Envelope (PoC)
+## ADSR Envelope
 
-The proof of concept uses simple gate on/off with a 5ms fade ramp. This keeps the code minimal while avoiding clicks. Full ADSR envelope support is planned for milestone 2.
+Each voice has an independent ADSR envelope with stages: IDLE → ATTACK → DECAY → SUSTAIN → RELEASE → IDLE.
 
-## Last-Note Priority
+The envelope level is a `uint32_t` accumulator (full 32-bit range, 0 to `0xFFFF0000`). Per-sample increments are precomputed from CC values using a quadratic time mapping (CC 0 → ~2 ms, CC 127 → ~2 s). The upper 16 bits of the level are used as a multiplier applied to the voice output, keeping the per-sample cost to a single 32×32 integer multiply.
 
-With a single voice, when a new note arrives it immediately replaces the current note. This "last-note priority" is the simplest monophonic behavior and works well for lead/bass sounds.
+This replaces the PoC's simple 5 ms fade ramp.
+
+## Voice Allocation & Stealing
+
+With 4-voice polyphony, incoming notes are assigned to free voices. If all voices are active, the oldest voice is stolen. Each voice carries a monotonic age counter to determine the steal target. Retriggering an already-playing note resets its phase and restarts the envelope from the current level.
 
 ## Sample Rate: 44100 Hz
 
 Standard CD-quality sample rate. The PCM5102A supports both 44100 and 48000 Hz. 44100 Hz was chosen as the conventional default and requires slightly less CPU per second.
+
+## Stereo Spread
+
+The 7 oscillators are assigned fixed pan positions: {−3, −2, −1, 0, +1, +2, +3}. The `spread` parameter (CC 93) scales these positions from mono center (spread = 0) to full stereo (spread = 127). Per-oscillator L/R gains are stored in Q8.8 fixed-point and recomputed only when the CC value changes.
+
+## Runtime Detune
+
+Detune is no longer hardcoded. The `detune` parameter (CC 94) interpolates each oscillator's frequency multiplier between unity (no detune) and a maximum offset of 0.5 semitones. Precomputed max-offset values per oscillator (`detuneMaxOffset[]`) keep the per-noteOn cost to 7 integer multiplies.
+
+## MIDI CC Configuration
+
+All CC number assignments are centralized in `src/config/midi_cc.h` as `#define` constants. This makes remapping parameters a single-file change with no logic edits required.
+
+| CC | Parameter | Range |
+|----|-----------|-------|
+| 73 | Attack | 0–127 → ~2 ms – 2 s |
+| 75 | Decay | 0–127 → ~2 ms – 2 s |
+| 79 | Sustain | 0–127 → 0–100% level |
+| 72 | Release | 0–127 → ~2 ms – 2 s |
+| 94 | Detune | 0–127 → 0–0.5 semitones |
+| 93 | Spread | 0–127 → mono to full stereo |
 
 ## Band-Limited Wavetable Synthesis
 

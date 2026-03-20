@@ -6,39 +6,76 @@
 #include "config/pins.h"
 
 #define NUM_OSCILLATORS 7
-#define FADE_SAMPLES 220 // ~5ms at 44100 Hz
+#define MAX_VOICES 4
 
 namespace synth {
 
-enum class FadeState : uint8_t {
-    NONE,
-    FADE_IN,
-    FADE_OUT
+// ADSR envelope state machine (per-voice)
+enum class EnvStage : uint8_t {
+    IDLE,
+    ATTACK,
+    DECAY,
+    SUSTAIN,
+    RELEASE
+};
+
+struct Envelope {
+    EnvStage stage;
+    uint32_t level;    // current level, Q16.16 (0 = silent, 65536 = full)
+
+    void gate(bool on);
+    // Advance one sample; returns current level (Q16.16).
+    // Shared ADSR rates are passed in to avoid per-voice storage.
+    uint32_t tick(uint32_t attackInc, uint32_t decayInc,
+                  uint32_t sustainLevel, uint32_t releaseInc);
+};
+
+struct Voice {
+    uint32_t phase[NUM_OSCILLATORS];
+    uint32_t phaseInc[NUM_OSCILLATORS];
+    uint8_t  note;
+    bool     active;     // true while voice is sounding (including release)
+    uint32_t age;        // incremented each noteOn for voice-stealing
+    Envelope env;
+
+    void reset();
 };
 
 struct Supersaw {
-    uint32_t phase[NUM_OSCILLATORS];
-    uint32_t phaseInc[NUM_OSCILLATORS];
+    Voice voices[MAX_VOICES];
+    uint32_t nextAge; // monotonic counter for voice allocation
 
-    bool active;
-    uint8_t currentNote;
+    // Shared ADSR parameters (Q16.16 increments / level)
+    uint32_t attackInc;    // level increment per sample during attack
+    uint32_t decayInc;     // level decrement per sample during decay
+    uint32_t sustainLevel; // sustain target level (Q16.16)
+    uint32_t releaseInc;   // level decrement per sample during release
 
-    FadeState fadeState;
-    uint32_t fadePos; // current sample position within the fade ramp
+    uint8_t detuneAmount;  // 0–127 (CC value)
+    uint8_t spread;        // 0–127 (CC value)
+
+    // Per-oscillator stereo pan gains, derived from spread.
+    // Q8.8 fixed-point: 256 = unity.
+    uint16_t panL[NUM_OSCILLATORS];
+    uint16_t panR[NUM_OSCILLATORS];
 
     void init();
     void noteOn(uint8_t note, uint8_t velocity);
-    void noteOff();
+    void noteOff(uint8_t note);
+    void setCC(uint8_t cc, uint8_t value);
     void render(int16_t* buffer, size_t numStereoSamples);
+
+    bool anyVoiceActive() const;
+
+private:
+    void updateDetuneForVoice(Voice& v);
+    void recalcSpread();
+    static uint32_t ccToEnvInc(uint8_t cc);
 };
 
 // Precomputed phase increment table (one entry per MIDI note 0–127).
 // phase_inc = freq / SAMPLE_RATE * 2^32
 extern const uint32_t midiNotePhaseInc[128];
-
-// Detune multipliers for the 7 oscillators, stored as Q16.16 fixed-point.
-// Offsets: -3/3, -2/3, -1/3, 0, +1/3, +2/3, +3/3 of 0.3 semitones.
-extern const uint32_t detuneMultiplier[NUM_OSCILLATORS];
 
 } // namespace synth
 

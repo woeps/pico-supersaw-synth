@@ -5,19 +5,16 @@
 
 namespace midi {
 
-// Current note for monophonic note-off matching
-static uint8_t currentNote = 0;
-
 static uart_inst_t* midiUart = nullptr;
 
 enum class ParserState : uint8_t {
     IDLE,
-    NOTE_RECEIVED
+    DATA1_RECEIVED
 };
 
 static ParserState parserState = ParserState::IDLE;
 static uint8_t statusByte = 0;
-static uint8_t noteByte = 0;
+static uint8_t data1Byte = 0;
 
 void midiInit(uart_inst_t* uart, uint rxPin) {
     midiUart = uart;
@@ -41,20 +38,21 @@ bool midiEventPop(MidiEvent& event) {
     return true;
 }
 
-static void dispatchNoteEvent(uint8_t status, uint8_t note, uint8_t velocity) {
+static void dispatchEvent(uint8_t status, uint8_t d1, uint8_t d2) {
     uint8_t msgType = status & 0xF0;
 
-    if (msgType == 0x90 && velocity > 0) {
+    if (msgType == 0x90 && d2 > 0) {
         // Note On
-        currentNote = note;
-        MidiEvent event{note, true};
+        MidiEvent event{MidiEventType::NOTE_ON, d1, d2};
         multicore_fifo_push_blocking(event.pack());
-    } else if (msgType == 0x80 || (msgType == 0x90 && velocity == 0)) {
+    } else if (msgType == 0x80 || (msgType == 0x90 && d2 == 0)) {
         // Note Off (explicit or velocity-0 convention)
-        if (note == currentNote) {
-            MidiEvent event{note, false};
-            multicore_fifo_push_blocking(event.pack());
-        }
+        MidiEvent event{MidiEventType::NOTE_OFF, d1, d2};
+        multicore_fifo_push_blocking(event.pack());
+    } else if (msgType == 0xB0) {
+        // Control Change
+        MidiEvent event{MidiEventType::CC, d1, d2};
+        multicore_fifo_push_blocking(event.pack());
     }
 }
 
@@ -70,7 +68,7 @@ void midiPoll() {
         if (byte & 0x80) {
             // Status byte
             uint8_t msgType = byte & 0xF0;
-            if (msgType == 0x80 || msgType == 0x90) {
+            if (msgType == 0x80 || msgType == 0x90 || msgType == 0xB0) {
                 statusByte = byte;
                 parserState = ParserState::IDLE;
             } else {
@@ -87,15 +85,15 @@ void midiPoll() {
 
             switch (parserState) {
                 case ParserState::IDLE:
-                    // First data byte: note number
-                    noteByte = byte;
-                    parserState = ParserState::NOTE_RECEIVED;
+                    // First data byte: note number or CC number
+                    data1Byte = byte;
+                    parserState = ParserState::DATA1_RECEIVED;
                     break;
 
-                case ParserState::NOTE_RECEIVED:
-                    // Second data byte: velocity
-                    dispatchNoteEvent(statusByte, noteByte, byte);
-                    // Support running status: stay ready for next note/velocity pair
+                case ParserState::DATA1_RECEIVED:
+                    // Second data byte: velocity or CC value
+                    dispatchEvent(statusByte, data1Byte, byte);
+                    // Support running status: stay ready for next data pair
                     parserState = ParserState::IDLE;
                     break;
             }
