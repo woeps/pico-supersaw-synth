@@ -58,7 +58,19 @@ frac = (phase >> 5) & 0xFFFF          // next 16 bits → fractional part
 saw  = s0 + ((s1 - s0) * frac) >> 16  // linear interpolation
 ```
 
-The wavetables are stored in flash (not RAM) as `const` data.
+The wavetables are stored in flash as `const` data. At `noteOn()` time, the active octave band is copied into an SRAM cache to avoid XIP flash cache thrashing during rendering (see [Wavetable SRAM Cache](#wavetable-sram-cache)).
+
+## Wavetable SRAM Cache
+
+With 3–4 voices playing high notes simultaneously, each using a different octave band (4 KB per band), the working set exceeds the RP2040's 16 KB XIP flash cache, causing frequent cache misses (~10–30 cycle stalls per random read).
+
+To eliminate this, active wavetable bands are copied from flash into SRAM at `noteOn()` time. A shared cache with reference counting ensures:
+
+- **Deduplication:** Two voices on the same octave band share a single SRAM copy.
+- **Automatic eviction:** When all voices release a band, the cache slot is freed.
+- **Flash fallback:** If the cache is full (4 slots), rendering falls back to flash reads.
+
+The cache holds up to 4 bands (4 × 4 KB = 16 KB). SRAM reads are 1–2 cycles with zero cache miss penalty.
 
 ## Detune Curve
 
@@ -118,8 +130,10 @@ The filter is a single-pole HPF with cutoff ~20 Hz:
 
 ```
 y[n] = α × (y[n-1] + x[n] - x[n-1])
-α ≈ 0.9986 (65444 in Q16 fixed-point)
+α ≈ 0.9986 (16361 in Q14 fixed-point)
 ```
+
+Q14 format keeps all intermediates within `int32_t` range (worst-case: 16361 × 84000 = 1.37B < 2.15B), avoiding expensive `int64_t` multiplications on the M0+ core.
 
 Both L and R channels are filtered independently per voice.
 

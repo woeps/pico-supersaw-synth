@@ -118,8 +118,8 @@ void StereoChorus::process(int16_t& left, int16_t& right) {
     // out = dry + (wet - dry) * depth / 127
     int32_t dryL = left;
     int32_t dryR = right;
-    left  = static_cast<int16_t>(dryL + ((wetL - dryL) * depth / 127));
-    right = static_cast<int16_t>(dryR + ((wetR - dryR) * depth / 127));
+    left  = static_cast<int16_t>(dryL + (((wetL - dryL) * depth) >> 7));
+    right = static_cast<int16_t>(dryR + (((wetR - dryR) * depth) >> 7));
 
     // Advance write position
     writeIdx = (writeIdx + 1) & CHORUS_BUF_MASK;

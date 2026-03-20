@@ -89,9 +89,15 @@ Several design choices are specifically modeled after the Roland JP-8000 supersa
 - **Non-linear detune curve:** Piecewise-linear LUT gives fine control at low settings, exponential ramp at high values.
 - **Mix control:** Center oscillator at fixed ~0.195 gain, sides controlled by CC 95. Matches the JP's two primary timbral controls (detune + mix).
 - **Parameter smoothing:** One-pole slew on mix and detune prevents zipper noise during CC sweeps (~1 ms time constant).
-- **DC-blocking HPF:** Single-pole high-pass filter (~20 Hz) per voice removes DC offset and sub-fundamental energy.
+- **DC-blocking HPF:** Single-pole high-pass filter (~20 Hz) per voice removes DC offset and sub-fundamental energy. Uses Q14 fixed-point to stay within `int32_t` range on M0+.
 - **Naive saw character:** Raw phase accumulator for low notes adds the bright, shimmery aliasing characteristic of the JP-8000.
 - **Stereo chorus:** Post-mix stereo chorus with modulated delay lines, matching the JP-8000's approach of mono supersaw → stereo chorus for width.
+
+## Wavetable SRAM Cache
+
+When 3–4 voices play notes ≥ C5 simultaneously, each accesses a different 4 KB octave band in flash. The combined ~12–16 KB working set thrashes the RP2040's 16 KB XIP cache, causing 10–30 cycle stalls per random wavetable read.
+
+At `noteOn()` time, the required octave band is copied from flash into an SRAM cache (4 slots × 4 KB = 16 KB max). A reference-counted shared design ensures multiple voices on the same band share one copy, and slots are freed automatically when all referencing voices go idle. If the cache is full, rendering falls back to direct flash reads. SRAM reads complete in 1–2 cycles with no cache miss penalty.
 
 ## Stereo Chorus
 

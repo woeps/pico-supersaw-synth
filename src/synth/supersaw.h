@@ -5,9 +5,11 @@
 #include <cstddef>
 #include "config/pins.h"
 #include "synth/chorus.h"
+#include "synth/saw_wavetable.h"
 
 #define NUM_OSCILLATORS 7
 #define MAX_VOICES 4
+#define MAX_CACHED_BANDS 4
 
 namespace synth {
 
@@ -45,6 +47,10 @@ struct Voice {
     int32_t hpfPrevL;
     int32_t hpfPrevR;
 
+    // Pointer to SRAM-cached wavetable band (nullptr if note < 72 or uncached)
+    const int16_t* cachedTable;
+    int8_t cachedBandIdx;  // which band is cached, or -1 if none
+
     void reset();
 };
 
@@ -76,6 +82,15 @@ struct Supersaw {
 
     StereoChorus chorus;
 
+    // SRAM wavetable band cache: shared across voices with reference counting.
+    // Each slot holds a copy of one octave band (WAVETABLE_SIZE × int16_t = 4 KB).
+    struct BandCacheEntry {
+        int16_t data[WAVETABLE_SIZE];
+        int8_t bandIdx;   // octave band index stored here, or -1 if empty
+        uint8_t refCount; // number of voices referencing this entry
+    };
+    BandCacheEntry bandCache[MAX_CACHED_BANDS];
+
     void init();
     void noteOn(uint8_t note, uint8_t velocity);
     void noteOff(uint8_t note);
@@ -88,6 +103,8 @@ private:
     void updateDetuneForVoice(Voice& v);
     void recalcSpread();
     static uint32_t ccToEnvInc(uint8_t cc);
+    const int16_t* cacheAcquire(uint8_t bandIdx);
+    void cacheRelease(int8_t bandIdx);
 };
 
 // Precomputed phase increment table (one entry per MIDI note 0–127).

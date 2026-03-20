@@ -75,8 +75,9 @@ static const int8_t oscPanOffset[NUM_OSCILLATORS] = {-3, -2, -1, 0, 1, 2, 3};
 static constexpr uint32_t ENV_MAX = 0xFFFF0000u;
 
 // DC-blocking high-pass filter coefficient.
-// α ≈ 0.9986 in Q16 → cutoff ~20 Hz @ 44.1 kHz.
-static constexpr int32_t HPF_ALPHA = 65444;
+// α ≈ 0.9986 in Q14 → cutoff ~20 Hz @ 44.1 kHz.
+// Q14: worst-case intermediate 16361 × 84000 = 1.37B, fits int32_t.
+static constexpr int32_t HPF_ALPHA_Q14 = 16361;
 
 // ─── Envelope ───────────────────────────────────────────────────────────────
 
@@ -139,6 +140,8 @@ void Voice::reset() {
     env.stage = EnvStage::IDLE;
     env.level = 0;
     hpfStateL = hpfStateR = hpfPrevL = hpfPrevR = 0;
+    cachedTable = nullptr;
+    cachedBandIdx = -1;
 }
 
 // ─── Supersaw ───────────────────────────────────────────────────────────────
@@ -175,7 +178,49 @@ void Supersaw::init() {
 
     recalcSpread();
 
+    // Initialize wavetable SRAM band cache
+    for (int i = 0; i < MAX_CACHED_BANDS; i++) {
+        bandCache[i].bandIdx = -1;
+        bandCache[i].refCount = 0;
+    }
+
     chorus.init();
+}
+
+const int16_t* Supersaw::cacheAcquire(uint8_t bandIdx) {
+    // Check if this band is already cached
+    for (int i = 0; i < MAX_CACHED_BANDS; i++) {
+        if (bandCache[i].bandIdx == static_cast<int8_t>(bandIdx)) {
+            bandCache[i].refCount++;
+            return bandCache[i].data;
+        }
+    }
+    // Find an empty slot and copy from flash
+    for (int i = 0; i < MAX_CACHED_BANDS; i++) {
+        if (bandCache[i].bandIdx < 0) {
+            memcpy(bandCache[i].data, sawWavetable[bandIdx], WAVETABLE_SIZE * sizeof(int16_t));
+            bandCache[i].bandIdx = static_cast<int8_t>(bandIdx);
+            bandCache[i].refCount = 1;
+            return bandCache[i].data;
+        }
+    }
+    // Cache full — fall back to flash
+    return nullptr;
+}
+
+void Supersaw::cacheRelease(int8_t bandIdx) {
+    if (bandIdx < 0) return;
+    for (int i = 0; i < MAX_CACHED_BANDS; i++) {
+        if (bandCache[i].bandIdx == bandIdx) {
+            if (bandCache[i].refCount > 0) {
+                bandCache[i].refCount--;
+            }
+            if (bandCache[i].refCount == 0) {
+                bandCache[i].bandIdx = -1;
+            }
+            return;
+        }
+    }
 }
 
 void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
@@ -210,12 +255,21 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
     }
 
     (void)found;
+    // Release cache for stolen voice before reset
+    cacheRelease(voices[idx].cachedBandIdx);
     voices[idx].reset();
     voices[idx].note = note;
     voices[idx].active = true;
     voices[idx].age = nextAge++;
     voices[idx].env.gate(true);
     updateDetuneForVoice(voices[idx]);
+
+    // Acquire SRAM-cached wavetable band for high notes
+    if (note >= 72) {
+        uint8_t band = noteToOctaveBand[note];
+        voices[idx].cachedTable = cacheAcquire(band);
+        voices[idx].cachedBandIdx = static_cast<int8_t>(band);
+    }
 }
 
 void Supersaw::noteOff(uint8_t note) {
@@ -304,7 +358,10 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
             uint32_t envLevel = voice.env.tick(attackInc, decayInc,
                                                 sustainLevel, releaseInc);
             if (voice.env.stage == EnvStage::IDLE) {
+                cacheRelease(voice.cachedBandIdx);
                 voice.active = false;
+                voice.cachedTable = nullptr;
+                voice.cachedBandIdx = -1;
                 continue;
             }
 
@@ -326,7 +383,10 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
                     saw = static_cast<int32_t>(voice.phase[osc] >> 17) - 16384;
                 } else {
                     // Band-limited wavetable for high notes to avoid harsh aliasing
-                    const int16_t* table = sawWavetable[noteToOctaveBand[voice.note]];
+                    // Use SRAM-cached band if available, fall back to flash
+                    const int16_t* table = voice.cachedTable
+                        ? voice.cachedTable
+                        : sawWavetable[noteToOctaveBand[voice.note]];
                     uint32_t idx = voice.phase[osc] >> 21;
                     uint32_t frac = (voice.phase[osc] >> 5) & 0xFFFF;
                     int16_t s0 = table[idx];
@@ -346,13 +406,11 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
             voiceR = (voiceR * 10579) >> 16;
 
             // DC-blocking high-pass filter (removes DC offset and sub-fundamental energy)
-            voice.hpfStateL = static_cast<int32_t>(
-                (static_cast<int64_t>(HPF_ALPHA) * (voice.hpfStateL + voiceL - voice.hpfPrevL)) >> 16);
+            voice.hpfStateL = (HPF_ALPHA_Q14 * (voice.hpfStateL + voiceL - voice.hpfPrevL)) >> 14;
             voice.hpfPrevL = voiceL;
             voiceL = voice.hpfStateL;
 
-            voice.hpfStateR = static_cast<int32_t>(
-                (static_cast<int64_t>(HPF_ALPHA) * (voice.hpfStateR + voiceR - voice.hpfPrevR)) >> 16);
+            voice.hpfStateR = (HPF_ALPHA_Q14 * (voice.hpfStateR + voiceR - voice.hpfPrevR)) >> 14;
             voice.hpfPrevR = voiceR;
             voiceR = voice.hpfStateR;
 
