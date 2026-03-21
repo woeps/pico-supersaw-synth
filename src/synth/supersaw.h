@@ -7,6 +7,7 @@
 #include "config/pins.h"
 #include "audio/audio_output.h"
 #include "synth/chorus.h"
+#include "synth/filter.h"
 #include "synth/saw_wavetable.h"
 
 #define NUM_OSCILLATORS 7
@@ -83,6 +84,7 @@ struct Supersaw {
     uint16_t panR[NUM_OSCILLATORS];
 
     StereoChorus chorus;
+    SVFilter filter;
 
     // Dual-core voice rendering: Core 1 writes its partial mix here.
     // Sized for max buffer (stereo pairs as int32_t to avoid overflow from 2-voice sum).

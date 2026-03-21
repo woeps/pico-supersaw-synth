@@ -186,6 +186,7 @@ void Supersaw::init() {
     }
 
     chorus.init();
+    filter.init();
 
     // Initialize dual-core rendering synchronization
     core1RenderCmd = 0;
@@ -314,6 +315,12 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
         chorus.setDepth(value);
     } else if (cc == CC_CHORUS_RATE) {
         chorus.setRate(value);
+    } else if (cc == CC_FILTER_CUTOFF) {
+        filter.setCutoff(value);
+    } else if (cc == CC_FILTER_RESO) {
+        filter.setResonance(value);
+    } else if (cc == CC_FILTER_MODE) {
+        filter.setMode(value);
     }
 }
 
@@ -476,7 +483,10 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         int16_t outL = static_cast<int16_t>(sampleL);
         int16_t outR = static_cast<int16_t>(sampleR);
 
-        // Stereo chorus (post-mix, pre-output)
+        // SVF filter (post-mix, pre-chorus)
+        filter.process(outL, outR);
+
+        // Stereo chorus (post-filter, pre-output)
         chorus.process(outL, outR);
 
         buffer[i * 2]     = outL;

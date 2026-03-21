@@ -148,14 +148,59 @@ voiceL += (saw × gain × panL[osc]) >> 16
 voiceR += (saw × gain × panR[osc]) >> 16
 ```
 
-## Stereo Chorus
+## SVF Filter
 
-A stereo chorus effect is applied to the final mixed output (after all voices are summed), modeled after the JP-8000's approach where stereo width comes from a downstream chorus rather than per-oscillator panning.
+A global 2-pole state-variable filter (SVF) is applied after voice mixing, before the stereo chorus. It supports three modes — low-pass (LPF), high-pass (HPF), and band-pass (BPF) — controlled via MIDI CC.
 
 ### Signal Path
 
 ```
-Voice Mix (÷4) → Clamp → Stereo Chorus → I2S Output
+Voice Mix (÷4) → Clamp → SVF Filter → Stereo Chorus → I2S Output
+```
+
+### Implementation
+
+The filter uses the Chamberlin SVF topology, **double-sampled** (two iterations per audio sample) for stability at high cutoff frequencies up to 16 kHz:
+
+```
+for each iteration (×2):
+    low  += f × band
+    high  = input − low − damp × band
+    band += f × high
+```
+
+Coefficients are Q14 fixed-point. State variables (`low`, `band`) are clamped to ±32767 after each iteration to prevent `int32_t` overflow in subsequent multiplications. The worst-case intermediate product is `32768 × 32767 ≈ 1.07B`, safely within `int32_t` range.
+
+The cutoff coefficient `f` is precomputed as a 128-entry flash lookup table mapping CC values to `sin(π × fc / 44100) × 16384`, with `fc` exponentially mapped from 20 Hz to 16 kHz. This avoids runtime trigonometry.
+
+The damping coefficient is computed directly from the resonance CC:
+
+```
+damp = 32768 − (cc × 31949) / 127    // Q14: maps CC 0→2.0, CC 127→0.05
+```
+
+### MIDI Control
+
+- **CC 74 (Filter Cutoff):** 0 = 20 Hz, 127 = 16 kHz (wide open, bypass). Default: 127.
+- **CC 71 (Filter Resonance):** 0 = flat (Q=0.5), 127 = high resonance (Q≈20). Default: 0.
+- **CC 70 (Filter Mode):** 0–42 = LPF, 43–84 = BPF, 85–127 = HPF. Default: LPF.
+
+When cutoff is ≥125 and mode is LPF, the filter bypasses processing entirely (zero CPU cost). At CC 125–127 the cutoff exceeds 14 kHz, making LPF transparent.
+
+### Memory & CPU
+
+- **RAM:** 4 × `int32_t` state variables + 2 × `int16_t` coefficients = 20 bytes
+- **Flash:** 128 × `int16_t` cutoff table = 256 bytes
+- **CPU:** ~20 multiply-adds per stereo sample (10 per channel × 2 iterations)
+
+## Stereo Chorus
+
+A stereo chorus effect is applied to the final mixed output (after the SVF filter), modeled after the JP-8000's approach where stereo width comes from a downstream chorus rather than per-oscillator panning.
+
+### Signal Path
+
+```
+Voice Mix (÷4) → Clamp → SVF Filter → Stereo Chorus → I2S Output
 ```
 
 The chorus coexists with the per-oscillator spread — spread positions the oscillators in the stereo field, while the chorus adds modulated stereo widening on top.

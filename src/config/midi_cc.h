@@ -12,5 +12,8 @@
 #define CC_MIX     95
 #define CC_CHORUS_DEPTH 91
 #define CC_CHORUS_RATE  92
+#define CC_FILTER_CUTOFF 74
+#define CC_FILTER_RESO   71
+#define CC_FILTER_MODE   70
 
 #endif // MIDI_CC_H
