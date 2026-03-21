@@ -67,12 +67,14 @@ def compute_wavetable(band: int) -> list[int]:
         for n in range(WAVETABLE_SIZE):
             table[n] += amplitude * math.sin(2.0 * math.pi * k * n / WAVETABLE_SIZE)
 
-    # Normalize: scale so peak amplitude maps to int16_t range
+    # Normalize: scale so peak amplitude matches naive saw range (±16383).
+    # The naive oscillator produces values in [-16384, +16383] via (phase >> 17) - 16384,
+    # so wavetables must target the same amplitude to avoid a loudness jump at the crossover.
     peak = max(abs(v) for v in table) if table else 1.0
     if peak == 0.0:
         peak = 1.0
-    scale = 32767.0 / peak
-    return [max(-32768, min(32767, int(v * scale + (0.5 if v >= 0 else -0.5)))) for v in table]
+    scale = 16383.0 / peak
+    return [max(-16384, min(16383, int(v * scale + (0.5 if v >= 0 else -0.5)))) for v in table]
 
 
 def compute_note_to_band() -> list[int]:

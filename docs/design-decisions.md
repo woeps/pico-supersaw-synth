@@ -76,7 +76,7 @@ All CC number assignments are centralized in `src/config/midi_cc.h` as `#define`
 A hybrid approach balances JP-8000 authenticity with practical constraints at 44.1 kHz:
 
 - **Notes below C5 (MIDI 0–71):** Naive sawtooth from the raw phase accumulator. Aliasing harmonics land above ~16 kHz and add the characteristic bright "air" of the JP-8000. This path is also cheaper than wavetable lookup.
-- **Notes C5 and above (MIDI 72–127):** Band-limited wavetables prevent harsh audible aliasing. 11 octave bands generated via additive synthesis with harmonics limited below Nyquist. Tables stored in flash (~44 KB).
+- **Notes C5 and above (MIDI 72–127):** Band-limited wavetables prevent harsh audible aliasing. 11 octave bands generated via additive synthesis with harmonics limited below Nyquist. Tables are normalized to ±16383 (matching the naive saw's amplitude range) to ensure a seamless loudness crossover. Tables stored in flash (~44 KB).
 
 The JP-8000 uses naive saws at 88.2 kHz, pushing aliasing further above the audible range. At 44.1 kHz, the hybrid threshold at C5 is a practical compromise.
 
