@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cstdint>
 #include <cstdio>
+#include "pico/platform.h"
 
 namespace synth {
 
@@ -185,13 +186,20 @@ void Supersaw::init() {
     }
 
     chorus.init();
+
+    // Initialize dual-core rendering synchronization
+    core1RenderCmd = 0;
+    core1RenderDone = false;
+    cacheLock = spin_lock_init(spin_lock_claim_unused(true));
 }
 
 const int16_t* Supersaw::cacheAcquire(uint8_t bandIdx) {
+    uint32_t save = spin_lock_blocking(cacheLock);
     // Check if this band is already cached
     for (int i = 0; i < MAX_CACHED_BANDS; i++) {
         if (bandCache[i].bandIdx == static_cast<int8_t>(bandIdx)) {
             bandCache[i].refCount++;
+            spin_unlock(cacheLock, save);
             return bandCache[i].data;
         }
     }
@@ -201,15 +209,18 @@ const int16_t* Supersaw::cacheAcquire(uint8_t bandIdx) {
             memcpy(bandCache[i].data, sawWavetable[bandIdx], WAVETABLE_SIZE * sizeof(int16_t));
             bandCache[i].bandIdx = static_cast<int8_t>(bandIdx);
             bandCache[i].refCount = 1;
+            spin_unlock(cacheLock, save);
             return bandCache[i].data;
         }
     }
     // Cache full — fall back to flash
+    spin_unlock(cacheLock, save);
     return nullptr;
 }
 
 void Supersaw::cacheRelease(int8_t bandIdx) {
     if (bandIdx < 0) return;
+    uint32_t save = spin_lock_blocking(cacheLock);
     for (int i = 0; i < MAX_CACHED_BANDS; i++) {
         if (bandCache[i].bandIdx == bandIdx) {
             if (bandCache[i].refCount > 0) {
@@ -218,9 +229,11 @@ void Supersaw::cacheRelease(int8_t bandIdx) {
             if (bandCache[i].refCount == 0) {
                 bandCache[i].bandIdx = -1;
             }
+            spin_unlock(cacheLock, save);
             return;
         }
     }
+    spin_unlock(cacheLock, save);
 }
 
 void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
@@ -333,7 +346,83 @@ bool Supersaw::anyVoiceActive() const {
     return false;
 }
 
+void Supersaw::renderVoiceSample(int startV, int endV,
+                                  int32_t& outL, int32_t& outR,
+                                  int32_t sideGain) {
+    static constexpr int32_t CENTER_GAIN = 50; // 50/256 ≈ 0.195 in Q8.8
+
+    for (int v = startV; v < endV; v++) {
+        Voice& voice = voices[v];
+        if (!voice.active) continue;
+
+        uint32_t envLevel = voice.env.tick(attackInc, decayInc,
+                                            sustainLevel, releaseInc);
+        if (voice.env.stage == EnvStage::IDLE) {
+            cacheRelease(voice.cachedBandIdx);
+            voice.active = false;
+            voice.cachedTable = nullptr;
+            voice.cachedBandIdx = -1;
+            continue;
+        }
+
+        int32_t voiceL = 0;
+        int32_t voiceR = 0;
+
+        for (int osc = 0; osc < NUM_OSCILLATORS; osc++) {
+            voice.phase[osc] += voice.phaseInc[osc];
+
+            int32_t saw;
+            if (voice.note < 72) {
+                // Naive saw: raw phase accumulator for JP-8000 aliasing character.
+                saw = static_cast<int32_t>(voice.phase[osc] >> 17) - 16384;
+            } else {
+                // Band-limited wavetable for high notes to avoid harsh aliasing
+                const int16_t* table = voice.cachedTable
+                    ? voice.cachedTable
+                    : sawWavetable[noteToOctaveBand[voice.note]];
+                uint32_t idx = voice.phase[osc] >> 21;
+                uint32_t frac = (voice.phase[osc] >> 5) & 0xFFFF;
+                int16_t s0 = table[idx];
+                int16_t s1 = table[(idx + 1) & (WAVETABLE_SIZE - 1)];
+                saw = s0 + ((static_cast<int32_t>(s1 - s0) * static_cast<int32_t>(frac)) >> 16);
+            }
+
+            int32_t gain = (osc == 3) ? CENTER_GAIN : sideGain;
+            voiceL += (saw * gain * static_cast<int32_t>(panL[osc])) >> 16;
+            voiceR += (saw * gain * static_cast<int32_t>(panR[osc])) >> 16;
+        }
+
+        // Normalize by max effective gain (mix=127):
+        // center=50/256 + 6×sides=256/256 → ~6.195× saw amplitude.
+        // ÷6.195 ≈ ×10579 >> 16.
+        voiceL = (voiceL * 10579) >> 16;
+        voiceR = (voiceR * 10579) >> 16;
+
+        // DC-blocking high-pass filter (removes DC offset and sub-fundamental energy)
+        voice.hpfStateL = (HPF_ALPHA_Q14 * (voice.hpfStateL + voiceL - voice.hpfPrevL)) >> 14;
+        voice.hpfPrevL = voiceL;
+        voiceL = voice.hpfStateL;
+
+        voice.hpfStateR = (HPF_ALPHA_Q14 * (voice.hpfStateR + voiceR - voice.hpfPrevR)) >> 14;
+        voice.hpfPrevR = voiceR;
+        voiceR = voice.hpfStateR;
+
+        // Apply envelope: envLevel is 0..0xFFFF0000, use upper 16 bits as multiplier
+        int32_t envMul = static_cast<int32_t>(envLevel >> 16);
+        voiceL = (voiceL * envMul) >> 16;
+        voiceR = (voiceR * envMul) >> 16;
+
+        outL += voiceL;
+        outR += voiceR;
+    }
+}
+
 void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
+    // Signal Core 1 to render voices 2–3 into scratch buffer
+    core1RenderDone = false;
+    core1RenderCmd = numStereoSamples;
+
+    // Core 0: render voices 0–1 into output buffer (temporary partial mix)
     for (size_t i = 0; i < numStereoSamples; i++) {
         int32_t sampleL = 0;
         int32_t sampleR = 0;
@@ -343,85 +432,36 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         currentDetune += (targetDetune - currentDetune) >> 6;
 
         // Periodically recalculate phase increments from smoothed detune
+        // (Core 0 updates voices 0–1 only; Core 1 updates voices 2–3)
         if (++detuneSmoothCounter >= 32) {
             detuneSmoothCounter = 0;
             detuneAmount = static_cast<uint8_t>(currentDetune >> 8);
-            for (int v = 0; v < MAX_VOICES; v++) {
+            for (int v = 0; v < 2; v++) {
                 if (voices[v].active) updateDetuneForVoice(voices[v]);
             }
         }
 
-        for (int v = 0; v < MAX_VOICES; v++) {
-            Voice& voice = voices[v];
-            if (!voice.active) continue;
+        renderVoiceSample(0, 2, sampleL, sampleR, currentMix);
 
-            uint32_t envLevel = voice.env.tick(attackInc, decayInc,
-                                                sustainLevel, releaseInc);
-            if (voice.env.stage == EnvStage::IDLE) {
-                cacheRelease(voice.cachedBandIdx);
-                voice.active = false;
-                voice.cachedTable = nullptr;
-                voice.cachedBandIdx = -1;
-                continue;
-            }
+        // Clamp partial 2-voice sum to int16_t for temporary storage
+        if (sampleL > 32767) sampleL = 32767;
+        if (sampleL < -32768) sampleL = -32768;
+        if (sampleR > 32767) sampleR = 32767;
+        if (sampleR < -32768) sampleR = -32768;
 
-            int32_t voiceL = 0;
-            int32_t voiceR = 0;
+        buffer[i * 2]     = static_cast<int16_t>(sampleL);
+        buffer[i * 2 + 1] = static_cast<int16_t>(sampleR);
+    }
 
-            // JP-8000 mix: center osc (index 3) at fixed gain ~0.195,
-            // side oscillators scaled by smoothed mix.
-            static constexpr int32_t CENTER_GAIN = 50; // 50/256 ≈ 0.195 in Q8.8
-            int32_t sideGain = currentMix;
+    // Wait for Core 1 to complete rendering voices 2–3
+    while (!core1RenderDone) {
+        tight_loop_contents();
+    }
 
-            for (int osc = 0; osc < NUM_OSCILLATORS; osc++) {
-                voice.phase[osc] += voice.phaseInc[osc];
-
-                int32_t saw;
-                if (voice.note < 72) {
-                    // Naive saw: raw phase accumulator for JP-8000 aliasing character.
-                    // At 44.1 kHz, aliasing for notes below C5 lands above ~16 kHz.
-                    saw = static_cast<int32_t>(voice.phase[osc] >> 17) - 16384;
-                } else {
-                    // Band-limited wavetable for high notes to avoid harsh aliasing
-                    // Use SRAM-cached band if available, fall back to flash
-                    const int16_t* table = voice.cachedTable
-                        ? voice.cachedTable
-                        : sawWavetable[noteToOctaveBand[voice.note]];
-                    uint32_t idx = voice.phase[osc] >> 21;
-                    uint32_t frac = (voice.phase[osc] >> 5) & 0xFFFF;
-                    int16_t s0 = table[idx];
-                    int16_t s1 = table[(idx + 1) & (WAVETABLE_SIZE - 1)];
-                    saw = s0 + ((static_cast<int32_t>(s1 - s0) * static_cast<int32_t>(frac)) >> 16);
-                }
-
-                int32_t gain = (osc == 3) ? CENTER_GAIN : sideGain;
-                voiceL += (saw * gain * static_cast<int32_t>(panL[osc])) >> 16;
-                voiceR += (saw * gain * static_cast<int32_t>(panR[osc])) >> 16;
-            }
-
-            // Normalize by max effective gain (mix=127):
-            // center=50/256 + 6×sides=256/256 → ~6.195× saw amplitude.
-            // ÷6.195 ≈ ×10579 >> 16.
-            voiceL = (voiceL * 10579) >> 16;
-            voiceR = (voiceR * 10579) >> 16;
-
-            // DC-blocking high-pass filter (removes DC offset and sub-fundamental energy)
-            voice.hpfStateL = (HPF_ALPHA_Q14 * (voice.hpfStateL + voiceL - voice.hpfPrevL)) >> 14;
-            voice.hpfPrevL = voiceL;
-            voiceL = voice.hpfStateL;
-
-            voice.hpfStateR = (HPF_ALPHA_Q14 * (voice.hpfStateR + voiceR - voice.hpfPrevR)) >> 14;
-            voice.hpfPrevR = voiceR;
-            voiceR = voice.hpfStateR;
-
-            // Apply envelope: envLevel is 0..0xFFFF0000, use upper 16 bits as multiplier
-            int32_t envMul = static_cast<int32_t>(envLevel >> 16);
-            voiceL = (voiceL * envMul) >> 16;
-            voiceR = (voiceR * envMul) >> 16;
-
-            sampleL += voiceL;
-            sampleR += voiceR;
-        }
+    // Merge Core 1's scratch buffer, normalize, clamp, and apply chorus
+    for (size_t i = 0; i < numStereoSamples; i++) {
+        int32_t sampleL = static_cast<int32_t>(buffer[i * 2])     + core1ScratchBuf[i * 2];
+        int32_t sampleR = static_cast<int32_t>(buffer[i * 2 + 1]) + core1ScratchBuf[i * 2 + 1];
 
         // Divide by MAX_VOICES to prevent clipping with full polyphony
         sampleL >>= 2;
@@ -441,6 +481,28 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
 
         buffer[i * 2]     = outL;
         buffer[i * 2 + 1] = outR;
+    }
+}
+
+void Supersaw::renderCore1Voices(size_t numStereoSamples) {
+    uint8_t localDetuneCounter = 0;
+
+    for (size_t i = 0; i < numStereoSamples; i++) {
+        int32_t sampleL = 0;
+        int32_t sampleR = 0;
+
+        // Periodically recalculate detune for Core 1's voices (2–3)
+        if (++localDetuneCounter >= 32) {
+            localDetuneCounter = 0;
+            for (int v = 2; v < MAX_VOICES; v++) {
+                if (voices[v].active) updateDetuneForVoice(voices[v]);
+            }
+        }
+
+        renderVoiceSample(2, MAX_VOICES, sampleL, sampleR, currentMix);
+
+        core1ScratchBuf[i * 2]     = sampleL;
+        core1ScratchBuf[i * 2 + 1] = sampleR;
     }
 }
 

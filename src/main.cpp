@@ -15,6 +15,14 @@ void core1_entry() {
 
     while (true) {
         midi::midiPoll();
+
+        // Check if Core 0 has requested a voice render
+        uint32_t cmd = supersaw.core1RenderCmd;
+        if (cmd != 0) {
+            supersaw.renderCore1Voices(cmd);
+            supersaw.core1RenderDone = true;
+            supersaw.core1RenderCmd = 0;
+        }
     }
 }
 
@@ -37,7 +45,7 @@ int main() {
     audio::audioInit();
 
     multicore_launch_core1(core1_entry);
-    printf("Core 1 launched (MIDI input).\n");
+    printf("Core 1 launched (MIDI input + voice rendering).\n");
 
     struct audio_buffer_pool* pool = audio::getAudioBufferPool();
 

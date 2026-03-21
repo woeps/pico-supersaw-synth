@@ -102,3 +102,29 @@ At `noteOn()` time, the required octave band is copied from flash into an SRAM c
 ## Stereo Chorus
 
 The JP-8000 generates its supersaw in mono and creates stereo width via a downstream chorus effect. This implementation adds a stereo chorus after the voice mix stage. Two delay lines (L and R) are modulated by a triangle LFO with 90° phase offset between channels. The LFO waveform is pre-computed as a 256-entry lookup table stored in flash (512 bytes), indexed by a 32-bit phase accumulator — no runtime branching for waveform generation. Delay buffers are 1024 samples (power-of-two for efficient bitmask wrapping), consuming ~4.1 KB RAM. The chorus depth defaults to 0 (dry/bypass) so existing patches are unaffected until CC 91 is sent.
+
+## Dual-Core Voice Rendering
+
+With all four voices active on high notes (≥ C5), the per-sample cycle budget (~2,834 cycles at 125 MHz / 44.1 kHz) is insufficient for 28 wavetable lookups plus envelopes, HPF, and mixing on a single core. Core 1 was previously dedicated to MIDI polling — idle >99.9% of the time at 31.25 kbaud.
+
+Voice rendering is now split equally across both cores:
+
+- **Core 0:** renders voices 0–1, performs parameter smoothing, merges results, applies chorus
+- **Core 1:** renders voices 2–3 into a shared scratch buffer, continues MIDI polling between buffers
+
+This nearly doubles the effective cycle budget to ~5,668 cycles per sample.
+
+### Synchronization
+
+Volatile shared variables coordinate rendering — no FIFO or mutex overhead per buffer. Core 0 writes a sample count to `core1RenderCmd`; Core 1 polls this alongside MIDI and renders when signaled. Core 1 sets `core1RenderDone` on completion; Core 0 spin-waits (typically < 1 µs since both cores do equal work).
+
+### Thread Safety
+
+- **ADSR parameters** are written by Core 0 before render starts and read-only during rendering — no race.
+- **Parameter smoothing** (`currentMix`, `currentDetune`) is updated per-sample by Core 0 only. Core 1 reads these atomically (32-bit loads are atomic on Cortex-M0+). The worst case is a one-sample-stale value — inaudible.
+- **Detune recalculation** is split: Core 0 updates voices 0–1, Core 1 updates voices 2–3, each using the shared `detuneAmount` (atomic `uint8_t` read).
+- **Wavetable SRAM cache** (`bandCache`) is protected by an RP2040 hardware spinlock. Both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering. The spinlock is only contended in this rare case, adding near-zero overhead.
+
+### Memory Cost
+
+The scratch buffer (`int32_t[512]`) adds ~2 KB RAM — negligible on the RP2040's 264 KB SRAM.

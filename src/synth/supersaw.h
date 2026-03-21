@@ -3,7 +3,9 @@
 
 #include <cstdint>
 #include <cstddef>
+#include "hardware/sync.h"
 #include "config/pins.h"
+#include "audio/audio_output.h"
 #include "synth/chorus.h"
 #include "synth/saw_wavetable.h"
 
@@ -82,6 +84,19 @@ struct Supersaw {
 
     StereoChorus chorus;
 
+    // Dual-core voice rendering: Core 1 writes its partial mix here.
+    // Sized for max buffer (stereo pairs as int32_t to avoid overflow from 2-voice sum).
+    int32_t core1ScratchBuf[AUDIO_BUFFER_SAMPLES * 2];
+
+    // Inter-core synchronization (volatile for cross-core visibility).
+    // core1RenderCmd: 0 = idle, >0 = number of stereo samples to render.
+    // core1RenderDone: set true by Core 1 when rendering is complete.
+    volatile uint32_t core1RenderCmd;
+    volatile bool core1RenderDone;
+
+    // Hardware spinlock for bandCache access (shared between cores).
+    spin_lock_t* cacheLock;
+
     // SRAM wavetable band cache: shared across voices with reference counting.
     // Each slot holds a copy of one octave band (WAVETABLE_SIZE × int16_t = 4 KB).
     struct BandCacheEntry {
@@ -97,6 +112,9 @@ struct Supersaw {
     void setCC(uint8_t cc, uint8_t value);
     void render(int16_t* buffer, size_t numStereoSamples);
 
+    // Called by Core 1: renders voices 2–3 into core1ScratchBuf.
+    void renderCore1Voices(size_t numStereoSamples);
+
     bool anyVoiceActive() const;
 
 private:
@@ -105,6 +123,12 @@ private:
     static uint32_t ccToEnvInc(uint8_t cc);
     const int16_t* cacheAcquire(uint8_t bandIdx);
     void cacheRelease(int8_t bandIdx);
+
+    // Render a range of voices [startV, endV) for one sample.
+    // Accumulates into outL/outR. Handles envelope tick, HPF, and cache release on IDLE.
+    void renderVoiceSample(int startV, int endV,
+                           int32_t& outL, int32_t& outR,
+                           int32_t sideGain);
 };
 
 // Precomputed phase increment table (one entry per MIDI note 0–127).
