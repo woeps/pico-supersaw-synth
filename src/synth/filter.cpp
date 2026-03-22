@@ -5,41 +5,43 @@ namespace synth {
 // Piecewise-exponential cutoff coefficients (Q14):
 //   CC   0–80:  20 Hz → 8000 Hz  (exponential)
 //   CC 80–127: 8000 Hz → 16000 Hz  (exponential, finer resolution)
-// coeff = sin(π × fc / 44100) × 16384
-const int16_t filterCutoffTable[128] = {
+// coeff = tan(π × fc / 44100) × 16384
+const int32_t filterCutoffTable[128] = {
        23,    25,    27,    29,    31,    34,    37,    39,
        42,    46,    49,    53,    57,    62,    67,    72,
        77,    83,    90,    97,   104,   113,   121,   131,
       141,   152,   164,   176,   190,   205,   221,   238,
       256,   276,   298,   321,   346,   373,   402,   433,
-      467,   503,   542,   584,   630,   679,   731,   788,
-      850,   916,   987,  1063,  1146,  1235,  1331,  1434,
-     1545,  1665,  1794,  1933,  2082,  2243,  2416,  2603,
-     2803,  3019,  3251,  3500,  3767,  4054,  4362,  4692,
-     5045,  5423,  5827,  6258,  6716,  7203,  7720,  8265,
-     8840,  8956,  9074,  9193,  9312,  9433,  9555,  9677,
-     9801,  9926, 10051, 10178, 10305, 10433, 10562, 10692,
-    10823, 10954, 11086, 11218, 11351, 11485, 11619, 11754,
-    11889, 12024, 12159, 12294, 12430, 12566, 12701, 12836,
-    12971, 13106, 13240, 13374, 13507, 13639, 13770, 13900,
-    14029, 14157, 14283, 14407, 14530, 14651, 14769, 14886,
+      467,   503,   543,   585,   630,   679,   732,   789,
+      851,   917,   988,  1066,  1149,  1238,  1335,  1439,
+     1552,  1674,  1805,  1946,  2099,  2265,  2443,  2636,
+     2845,  3071,  3317,  3582,  3871,  4184,  4525,  4897,
+     5303,  5747,  6235,  6771,  7363,  8020,  8752,  9573,
+    10499, 10696, 10898, 11105, 11318, 11537, 11762, 11993,
+    12231, 12476, 12728, 12988, 13256, 13532, 13817, 14111,
+    14416, 14730, 15056, 15393, 15742, 16104, 16480, 16871,
+    17277, 17700, 18141, 18600, 19080, 19581, 20106, 20656,
+    21233, 21840, 22478, 23152, 23862, 24615, 25412, 26259,
+    27161, 28123, 29153, 30257, 31446, 32730, 34120, 35631,
 };
 
 void SVFilter::init() {
-    lowL = bandL = 0;
-    lowR = bandR = 0;
+    s1_L = s2_L = 0;
+    s1_R = s2_R = 0;
     cutoffCoeff = filterCutoffTable[127]; // wide open
     dampCoeff = 32768;                    // Q=0.5 (no resonance)
+    int32_t g = cutoffCoeff;
+    int32_t R = dampCoeff;
+    D = (1 << 14) + ((2LL * R * g) >> 14) + ((1LL * g * g) >> 14);
     mode = FilterMode::LPF;
-    bypass = true;                        // cutoff=127 + LPF → passthrough
-    prevBypass = true;
-    crossfadeCount = 0;
 }
 
 void SVFilter::setCutoff(uint8_t cc) {
     if (cc > 127) cc = 127;
     cutoffCoeff = filterCutoffTable[cc];
-    bypass = (cc >= 125) && (mode == FilterMode::LPF);
+    int32_t g = cutoffCoeff;
+    int32_t R = dampCoeff;
+    D = (1 << 14) + ((2LL * R * g) >> 14) + ((1LL * g * g) >> 14);
 }
 
 void SVFilter::setResonance(uint8_t cc) {
@@ -47,6 +49,9 @@ void SVFilter::setResonance(uint8_t cc) {
     // Linear map: CC 0 → damp=2.0 (Q=0.5), CC 127 → damp=0.05 (Q≈20).
     // Q14: 32768 − (cc × 31949) / 127
     dampCoeff = 32768 - (static_cast<int32_t>(cc) * 31949) / 127;
+    int32_t g = cutoffCoeff;
+    int32_t R = dampCoeff;
+    D = (1 << 14) + ((2LL * R * g) >> 14) + ((1LL * g * g) >> 14);
 }
 
 void SVFilter::setMode(uint8_t cc) {
@@ -57,95 +62,63 @@ void SVFilter::setMode(uint8_t cc) {
     } else {
         mode = FilterMode::HPF;
     }
-    // Recalculate bypass: LPF with near-open cutoff (≥125)
-    bypass = (cutoffCoeff >= filterCutoffTable[125]) && (mode == FilterMode::LPF);
 }
 
 void SVFilter::process(int16_t& left, int16_t& right) {
-    // Detect bypass transitions and start a crossfade (32 samples ≈ 0.7 ms).
-    if (bypass != prevBypass) {
-        crossfadeCount = 32;
-        if (!bypass) {
-            // bypass → active: seed state from current input to avoid
-            // stale-state transient (replaces the old all-zero guard).
-            lowL  = static_cast<int32_t>(left)  >> 1;
-            lowR  = static_cast<int32_t>(right) >> 1;
-            bandL = bandR = 0;
-        }
-        prevBypass = bypass;
-    }
-
-    if (bypass && crossfadeCount == 0) return;
-
     // Attenuate input by 1 bit before the SVF to give state variables
     // 2× headroom before hitting the ±32767 clamp.  This eliminates
     // hard-clipping distortion at high cutoff coefficients.
     int32_t in_l = static_cast<int32_t>(left)  >> 1;
     int32_t in_r = static_cast<int32_t>(right) >> 1;
 
-    int32_t f = cutoffCoeff;
-    int32_t d = dampCoeff;
-    int32_t highL, highR;
+    int32_t g = cutoffCoeff;
+    int32_t R = dampCoeff;
+    int32_t D_half = D >> 1;
 
-    // Double-sampled Chamberlin SVF: two iterations per sample for
-    // stability at high cutoff frequencies (fc up to 16 kHz).
-    // State is clamped to ±32767 after each iteration to prevent
-    // int32_t overflow in subsequent multiplications.
-    for (int iter = 0; iter < 2; iter++) {
-        // Left channel
-        lowL  += (f * bandL) >> 14;
-        if (lowL >  32767) lowL =  32767;
-        if (lowL < -32768) lowL = -32768;
-        highL  = in_l - lowL - ((d * bandL) >> 14);
-        bandL += (f * highL) >> 14;
-        if (bandL >  32767) bandL =  32767;
-        if (bandL < -32768) bandL = -32768;
+    // Left channel ZDF Trapezoidal SVF
+    int32_t hp_num_L = in_l - ((R * s1_L) >> 13) - ((g * s1_L) >> 14) - s2_L;
+    int32_t hp_L = hw_divider_quotient_s32(hp_num_L << 13, D_half);
+    int32_t v1_L = (g * hp_L) >> 14;
+    int32_t bp_L = v1_L + s1_L;
+    int32_t v2_L = (g * bp_L) >> 14;
+    // int32_t lp_L = v2_L + s2_L; // Prepared for future LPF mode!
 
-        // Right channel
-        lowR  += (f * bandR) >> 14;
-        if (lowR >  32767) lowR =  32767;
-        if (lowR < -32768) lowR = -32768;
-        highR  = in_r - lowR - ((d * bandR) >> 14);
-        bandR += (f * highR) >> 14;
-        if (bandR >  32767) bandR =  32767;
-        if (bandR < -32768) bandR = -32768;
-    }
+    s1_L += 2 * v1_L;
+    if (s1_L >  32767) s1_L =  32767;
+    if (s1_L < -32768) s1_L = -32768;
+    s2_L += 2 * v2_L;
+    if (s2_L >  32767) s2_L =  32767;
+    if (s2_L < -32768) s2_L = -32768;
+
+    // Right channel ZDF Trapezoidal SVF
+    int32_t hp_num_R = in_r - ((R * s1_R) >> 13) - ((g * s1_R) >> 14) - s2_R;
+    int32_t hp_R = hw_divider_quotient_s32(hp_num_R << 13, D_half);
+    int32_t v1_R = (g * hp_R) >> 14;
+    int32_t bp_R = v1_R + s1_R;
+    int32_t v2_R = (g * bp_R) >> 14;
+    // int32_t lp_R = v2_R + s2_R; // Prepared for future LPF mode!
+
+    s1_R += 2 * v1_R;
+    if (s1_R >  32767) s1_R =  32767;
+    if (s1_R < -32768) s1_R = -32768;
+    s2_R += 2 * v2_R;
+    if (s2_R >  32767) s2_R =  32767;
+    if (s2_R < -32768) s2_R = -32768;
 
     // Select output based on filter mode and scale back up (+1 bit)
     int32_t outL, outR;
     switch (mode) {
         case FilterMode::HPF:
-            outL = highL << 1;
-            outR = highR << 1;
-            break;
         case FilterMode::BPF:
-            outL = bandL << 1;
-            outR = bandR << 1;
-            break;
         default: // LPF
-            outL = lowL << 1;
-            outR = lowR << 1;
+            // For now, only HPF is supported as per the plan
+            outL = hp_L << 1;
+            outR = hp_R << 1;
+            // outL = bp_L << 1;
+            // outR = bp_R << 1;
+            // outL = lp_L << 1;
+            // outR = lp_R << 1;
             break;
-    }
-
-    // Crossfade between filtered and dry signal on bypass transitions
-    if (crossfadeCount > 0) {
-        int32_t dryL = static_cast<int32_t>(left);
-        int32_t dryR = static_cast<int32_t>(right);
-        if (bypass) {
-            // active → bypass: fade from filtered to dry
-            int32_t wet = crossfadeCount;  // 32..1
-            int32_t dry = 32 - wet;
-            outL = (outL * wet + dryL * dry) >> 5;
-            outR = (outR * wet + dryR * dry) >> 5;
-        } else {
-            // bypass → active: fade from dry to filtered
-            int32_t wet = 32 - crossfadeCount;  // 1..32
-            int32_t dry = crossfadeCount;
-            outL = (outL * wet + dryL * dry) >> 5;
-            outR = (outR * wet + dryR * dry) >> 5;
-        }
-        crossfadeCount--;
     }
 
     // Clamp output to int16_t range

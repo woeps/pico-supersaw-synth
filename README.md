@@ -52,7 +52,8 @@ Simple midi controlled supersaw synthesizer.
 - Add mix parameter
     - control the volume ratio of the several saw-waves between the one in the harmonic center (pitch according to midi note on) and the others
 - Try to add a filter for the output signal. - if performance and rp2040 capabilities allow
-    - lowpass, highpass, bandpass
+    - highpass (implemented via Zero-Delay Feedback Trapezoidal SVF using RP2040 hardware divider)
+    - lowpass, bandpass (prepared in the code, to be wired up)
     - supporting cutoff frequency and resonance parameters
     - support keytracking
 

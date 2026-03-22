@@ -148,50 +148,48 @@ voiceL += (saw × gain × panL[osc]) >> 16
 voiceR += (saw × gain × panR[osc]) >> 16
 ```
 
-## SVF Filter
+## ZDF Filter
 
-A global 2-pole state-variable filter (SVF) is applied after voice mixing, before the stereo chorus. It supports three modes — low-pass (LPF), high-pass (HPF), and band-pass (BPF) — controlled via MIDI CC.
+A global 2-pole Zero-Delay Feedback (ZDF) Trapezoidal state-variable filter (SVF) is applied after voice mixing, before the stereo chorus. Currently, only the high-pass (HPF) output is mapped, but the filter inherently computes low-pass (LPF) and band-pass (BPF) signals internally.
 
 ### Signal Path
 
 ```
-Voice Mix (÷4) → Clamp → SVF Filter → Stereo Chorus → I2S Output
+Voice Mix (÷4) → Clamp → ZDF Filter → Stereo Chorus → I2S Output
 ```
 
 ### Implementation
 
-The filter uses the Chamberlin SVF topology, **double-sampled** (two iterations per audio sample) for stability at high cutoff frequencies up to 16 kHz:
+The filter uses the ZDF Trapezoidal topology, bypassing oversampling requirements by leveraging the SIO hardware divider on the RP2040 for absolute stability at high cutoff frequencies and resonance up to the Nyquist limit:
 
 ```
-for each iteration (×2):
-    low  += f × band
-    high  = input − low − damp × band
-    band += f × high
+hp_num = input - (R * s1) - (g * s1) - s2
+hp = hp_num / D_half    // Evaluated in hardware using 8 cycles
+v1 = g * hp
+bp = v1 + s1
+v2 = g * bp
+
+s1 += 2 * v1
+s2 += 2 * v2
 ```
 
-Coefficients are Q14 fixed-point. State variables (`low`, `band`) are clamped to ±32767 after each iteration to prevent `int32_t` overflow in subsequent multiplications. The worst-case intermediate product is `32768 × 32767 ≈ 1.07B`, safely within `int32_t` range.
+Coefficients and math use Q14 fixed-point or combinations thereof. State variables (`s1`, `s2`) are clamped to ±32767 after each iteration to prevent `int32_t` overflow. The core division utilizes the RP2040 `hw_divider_quotient_s32`, keeping the performance cost to a minimum.
 
-The cutoff coefficient `f` is precomputed as a 128-entry flash lookup table mapping CC values to `sin(π × fc / 44100) × 16384`, with `fc` exponentially mapped from 20 Hz to 16 kHz. This avoids runtime trigonometry.
+The cutoff coefficient `g` is precomputed as a 128-entry flash lookup table mapping CC values to `tan(π × fc / 44100) × 16384`, with `fc` exponentially mapped from 20 Hz to 16 kHz. This avoids runtime trigonometry.
 
-The damping coefficient is computed directly from the resonance CC:
-
-```
-damp = 32768 − (cc × 31949) / 127    // Q14: maps CC 0→2.0, CC 127→0.05
-```
+The denominator (`D = 1 + 2Rg + g^2`) is precomputed whenever the Cutoff or Resonance MIDI CCs are modified, avoiding evaluation on every audio sample.
 
 ### MIDI Control
 
-- **CC 74 (Filter Cutoff):** 0 = 20 Hz, 127 = 16 kHz (wide open, bypass). Default: 127.
+- **CC 74 (Filter Cutoff):** 0 = 20 Hz, 127 = 16 kHz. Default: 127.
 - **CC 71 (Filter Resonance):** 0 = flat (Q=0.5), 127 = high resonance (Q≈20). Default: 0.
-- **CC 70 (Filter Mode):** 0–42 = LPF, 43–84 = BPF, 85–127 = HPF. Default: LPF.
-
-When cutoff is ≥125 and mode is LPF, the filter bypasses processing entirely (zero CPU cost). At CC 125–127 the cutoff exceeds 14 kHz, making LPF transparent.
+- **CC 70 (Filter Mode):** 0–42 = LPF, 43–84 = BPF, 85–127 = HPF. Default: LPF. (Note: Only HPF is currently active on output).
 
 ### Memory & CPU
 
-- **RAM:** 4 × `int32_t` state variables + 2 × `int16_t` coefficients = 20 bytes
-- **Flash:** 128 × `int16_t` cutoff table = 256 bytes
-- **CPU:** ~20 multiply-adds per stereo sample (10 per channel × 2 iterations)
+- **RAM:** 4 × `int32_t` state variables + 3 × `int32_t` coefficients = 28 bytes
+- **Flash:** 128 × `int32_t` cutoff table = 512 bytes
+- **CPU:** ~18 instructions per channel, featuring 1 fast hardware division.
 
 ## Stereo Chorus
 

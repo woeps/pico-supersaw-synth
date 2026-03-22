@@ -43,13 +43,17 @@ def compute_cutoff_table() -> list[int]:
             # Segment 2: exponential from FREQ_BREAK to FREQ_MAX
             t = (cc - CC_BREAK) / (127 - CC_BREAK)
             fc = FREQ_BREAK * pow(FREQ_MAX / FREQ_BREAK, t)
-        coeff = math.sin(math.pi * fc / SAMPLE_RATE) * 16384.0
+        # Limit fc to avoid infinity approaching Nyquist
+        if fc > 22000.0:
+            fc = 22000.0
+            
+        coeff = math.tan(math.pi * fc / SAMPLE_RATE) * 16384.0
         table.append(max(1, int(coeff + 0.5)))
     return table
 
 
 def format_table(table: list[int]) -> str:
-    """Format the table as a C int16_t array initialiser."""
+    """Format the table as a C int32_t array initialiser."""
     lines = []
     for i in range(0, 128, 8):
         chunk = table[i : i + 8]
@@ -62,8 +66,8 @@ def print_table(table: list[int]):
     print(f"// Piecewise-exponential cutoff coefficients (Q14):")
     print(f"//   CC   0–{CC_BREAK}:  {FREQ_MIN:.0f} Hz → {FREQ_BREAK:.0f} Hz")
     print(f"//   CC {CC_BREAK}–127: {FREQ_BREAK:.0f} Hz → {FREQ_MAX:.0f} Hz")
-    print(f"// coeff = sin(π × fc / {SAMPLE_RATE}) × 16384")
-    print("const int16_t filterCutoffTable[128] = {")
+    print(f"// coeff = tan(π × fc / {SAMPLE_RATE}) × 16384")
+    print("const int32_t filterCutoffTable[128] = {")
     print(format_table(table))
     print("};")
     print()
@@ -96,12 +100,12 @@ def patch_filter_cpp(table: list[int]):
         f"(exponential)\n"
         f"//   CC {CC_BREAK}–127: {FREQ_BREAK:.0f} Hz → {FREQ_MAX:.0f} Hz  "
         f"(exponential, finer resolution)\n"
-        f"// coeff = sin(π × fc / {SAMPLE_RATE}) × 16384"
+        f"// coeff = tan(π × fc / {SAMPLE_RATE}) × 16384"
     )
     array_body = format_table(table)
     replacement = (
         f"{comment}\n"
-        f"const int16_t filterCutoffTable[128] = {{\n"
+        f"const int32_t filterCutoffTable[128] = {{\n"
         f"{array_body}\n"
         f"}};"
     )
@@ -110,7 +114,7 @@ def patch_filter_cpp(table: list[int]):
     pattern = (
         r"//[^\n]*cutoff[^\n]*\n"        # first comment line
         r"(?://[^\n]*\n)*"               # any additional comment lines
-        r"const int16_t filterCutoffTable\[128\]\s*=\s*\{[^}]+\};"
+        r"const int32_t filterCutoffTable\[128\]\s*=\s*\{[^}]+\};"
     )
     new_content, count = re.subn(pattern, replacement, content, flags=re.IGNORECASE)
     if count == 0:

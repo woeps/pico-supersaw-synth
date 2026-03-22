@@ -2,6 +2,7 @@
 #define FILTER_H
 
 #include <cstdint>
+#include "hardware/divider.h"
 
 namespace synth {
 
@@ -17,17 +18,15 @@ enum class FilterMode : uint8_t {
 // with fc on a piecewise-exponential curve:
 //   CC   0–80:  20 Hz → 8 kHz   (exponential)
 //   CC  80–127:  8 kHz → 16 kHz  (exponential, finer resolution)
-extern const int16_t filterCutoffTable[128];
+extern const int32_t filterCutoffTable[128];
 
 struct SVFilter {
-    int32_t lowL, bandL;   // Left channel state
-    int32_t lowR, bandR;   // Right channel state
-    int16_t cutoffCoeff;   // Q14, from lookup table
+    int32_t s1_L, s2_L;    // Left channel state
+    int32_t s1_R, s2_R;    // Right channel state
+    int32_t cutoffCoeff;   // Q14, from lookup table
     int32_t dampCoeff;     // Q14, derived from resonance CC
+    int32_t D;             // Denominator: 1 + 2Rg + g^2
     FilterMode mode;
-    bool bypass;           // true when cutoff CC = 127 and mode is LPF
-    bool prevBypass;       // previous bypass state for crossfade detection
-    int16_t crossfadeCount; // samples remaining in bypass crossfade (0 = inactive)
 
     void init();
     void setCutoff(uint8_t cc);
