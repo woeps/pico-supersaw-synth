@@ -40,12 +40,14 @@ pico_sdk_init()
 file(GLOB_RECURSE SYNTH_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/synth/*.cpp")
 file(GLOB_RECURSE MIDI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/midi/*.cpp")
 file(GLOB_RECURSE AUDIO_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/audio/*.cpp")
+file(GLOB_RECURSE CONFIG_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/config/*.cpp")
 
 add_executable(supersaw_midi_synth
     src/main.cpp
     ${SYNTH_SOURCES}
     ${MIDI_SOURCES}
     ${AUDIO_SOURCES}
+    ${CONFIG_SOURCES}
 )
 
 # binary info (readable by picotool)
@@ -64,6 +66,7 @@ target_link_libraries(supersaw_midi_synth
     pico_multicore
     pico_audio_i2s
     hardware_uart
+    hardware_flash
 )
 
 # Add the standard include files to the build

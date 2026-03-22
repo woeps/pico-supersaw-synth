@@ -76,4 +76,20 @@ The shared `bandCache` (wavetable SRAM cache) is protected by an RP2040 hardware
 | **audio** | `src/audio/audio_output.h/.cpp` | I2S output setup via pico_audio_i2s |
 | **config** | `src/config/pins.h` | Pin definitions |
 | **config** | `src/config/midi_cc.h` | MIDI CC number assignments |
-| **main** | `src/main.cpp` | Entry point, dual-core orchestration |
+| **config** | `src/config/preset_store.h/.cpp` | Flash preset save/restore |
+| **main** | `src/main.cpp` | Entry point, dual-core orchestration, BOOTSEL button handling |
+
+## Preset Persistence (BOOTSEL Button)
+
+The BOOTSEL button on the Tiny2040 doubles as a user-facing preset control:
+
+| Action | Effect | LED Feedback |
+|---|---|---|
+| Hold < 3 s, then release | Restore saved preset | Blue flash (500 ms) |
+| Hold ≥ 3 s | Entering save mode | Red blink (250 ms period) |
+| Hold ≥ 5 s (3 + 2) | Save current parameters | Green flash (500 ms) |
+| Power-on / reboot | Auto-restore if valid preset exists | — |
+
+All 12 CC-controllable parameters are persisted as raw `uint8_t` values in a 256-byte flash page at the last 4 KB sector. The `preset_store` module handles flash erase/program, while `main.cpp` manages the button state machine and LED feedback.
+
+Flash writes require pausing Core 1 via `multicore_lockout_start_blocking()` because the RP2040 executes code from flash (XiP). Core 1 calls `multicore_lockout_victim_init()` at startup to enable safe lockout. The brief audio dropout during save (~few ms) is acceptable for a user-initiated action.

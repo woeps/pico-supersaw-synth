@@ -172,6 +172,21 @@ void Supersaw::init() {
     spread = 0;         // mono (matches PoC)
     mixAmount = 127;    // full supersaw (all side oscillators at max)
 
+    // Initialize raw CC tracking to defaults
+    memset(rawCC, 0, sizeof(rawCC));
+    rawCC[CC_ATTACK]  = 0;
+    rawCC[CC_DECAY]   = 0;
+    rawCC[CC_SUSTAIN] = 127;
+    rawCC[CC_RELEASE] = 10;
+    rawCC[CC_DETUNE]  = 76;
+    rawCC[CC_SPREAD]  = 0;
+    rawCC[CC_MIX]     = 127;
+    rawCC[CC_CHORUS_DEPTH] = 0;
+    rawCC[CC_CHORUS_RATE]  = 0;
+    rawCC[CC_FILTER_CUTOFF] = 127;
+    rawCC[CC_FILTER_RESO]   = 0;
+    rawCC[CC_FILTER_MODE]   = 0;
+
     // Initialize parameter smoothing
     targetMix = currentMix = 256;  // Q8.8: 256 = full side gain
     targetDetune = currentDetune = static_cast<int32_t>(detuneAmount) << 8;
@@ -296,6 +311,7 @@ void Supersaw::noteOff(uint8_t note) {
 }
 
 void Supersaw::setCC(uint8_t cc, uint8_t value) {
+    rawCC[cc] = value;
     if (cc == CC_ATTACK) {
         attackInc = ccToEnvInc(value);
     } else if (cc == CC_DECAY) {
@@ -514,6 +530,10 @@ void Supersaw::renderCore1Voices(size_t numStereoSamples) {
         core1ScratchBuf[i * 2]     = sampleL;
         core1ScratchBuf[i * 2 + 1] = sampleR;
     }
+}
+
+uint8_t Supersaw::getCC(uint8_t cc) const {
+    return rawCC[cc];
 }
 
 } // namespace synth

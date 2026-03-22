@@ -143,3 +143,25 @@ Volatile shared variables coordinate rendering — no FIFO or mutex overhead per
 ### Memory Cost
 
 The scratch buffer (`int32_t[512]`) adds ~2 KB RAM — negligible on the RP2040's 264 KB SRAM.
+
+## Preset Persistence via Flash
+
+Synth parameters are persisted to the last 4 KB sector of flash so they survive power cycles. The design stores the 12 raw CC values (one `uint8_t` each) plus a 4-byte magic number and 1-byte version for validation — 17 bytes total, written as a 256-byte flash page (minimum programmable unit).
+
+### BOOTSEL Button as User Control
+
+The Tiny2040's BOOTSEL button is repurposed as a save/restore trigger. It is not a regular GPIO — it shares the QSPI SS line, so reading it requires temporarily overriding the flash chip-select pin and reading the SIO high GPIO register. The reader function is placed in RAM (`__no_inline_not_in_flash_func`) since flash XiP is disabled during the read. This causes a brief (~10 µs) flash pause per poll, which is negligible relative to the ~5.8 ms audio buffer period.
+
+### Button State Machine
+
+A hold-duration state machine runs in the main loop (polled once per audio buffer cycle):
+
+- **< 3 s release** → restore saved preset (blue LED flash)
+- **≥ 3 s hold** → red LED blink indicates save mode is armed
+- **≥ 5 s hold** → save current parameters (green LED flash)
+
+On boot, `preset_store::load()` checks the flash sector for a valid magic/version header and replays all CC values via `setCC()` before the audio loop starts.
+
+### Flash Write Safety
+
+Flash erase/program requires that no code executes from flash on either core. Core 1 registers as a lockout victim via `multicore_lockout_victim_init()` at startup. Before writing, Core 0 calls `multicore_lockout_start_blocking()` which triggers an NMI on Core 1, parking it in a RAM-resident spin loop. After the write completes, `multicore_lockout_end_blocking()` releases Core 1. The total audio dropout is ~5–10 ms — acceptable for an explicit user-initiated save.

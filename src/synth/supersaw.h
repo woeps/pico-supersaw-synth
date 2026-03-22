@@ -83,6 +83,9 @@ struct Supersaw {
     uint16_t panL[NUM_OSCILLATORS];
     uint16_t panR[NUM_OSCILLATORS];
 
+    // Raw CC values for preset save/restore (indexed by CC number, 128 slots).
+    uint8_t rawCC[128];
+
     StereoChorus chorus;
     SVFilter filter;
 
@@ -118,6 +121,9 @@ struct Supersaw {
     void renderCore1Voices(size_t numStereoSamples);
 
     bool anyVoiceActive() const;
+
+    // Return the raw CC value last set for a given CC number.
+    uint8_t getCC(uint8_t cc) const;
 
 private:
     void updateDetuneForVoice(Voice& v);
