@@ -1,11 +1,18 @@
 #include "midi/midi_input.h"
 #include "hardware/gpio.h"
-#include "pico/multicore.h"
+#include "hardware/sync.h"
 #include "config/pins.h"
 
 namespace midi {
 
 static uart_inst_t* midiUart = nullptr;
+
+// A lock-free ring buffer for cross-core MIDI event passing.
+// Must be 256 to naturally wrap around with uint8_t indices.
+static constexpr size_t MIDI_QUEUE_SIZE = 256;
+static volatile uint32_t midiQueue[MIDI_QUEUE_SIZE];
+static volatile uint8_t midiQueueHead = 0; // Written by Core 1 (producer)
+static volatile uint8_t midiQueueTail = 0; // Written by Core 0 (consumer)
 
 enum class ParserState : uint8_t {
     IDLE,
@@ -26,16 +33,29 @@ void midiInit(uart_inst_t* uart, uint rxPin) {
 }
 
 bool midiEventAvailable() {
-    return multicore_fifo_rvalid();
+    return midiQueueHead != midiQueueTail;
 }
 
 bool midiEventPop(MidiEvent& event) {
-    if (!multicore_fifo_rvalid()) {
+    if (midiQueueHead == midiQueueTail) {
         return false;
     }
-    uint32_t data = multicore_fifo_pop_blocking();
+    
+    uint32_t data = midiQueue[midiQueueTail];
+    __dmb(); // Ensure data is read before updating tail
+    midiQueueTail++;
     event = MidiEvent::unpack(data);
+    
     return true;
+}
+
+static void pushEvent(const MidiEvent& event) {
+    uint8_t nextHead = midiQueueHead + 1;
+    if (nextHead != midiQueueTail) {
+        midiQueue[midiQueueHead] = event.pack();
+        __dmb(); // Ensure data is written before updating head
+        midiQueueHead = nextHead;
+    }
 }
 
 static void dispatchEvent(uint8_t status, uint8_t d1, uint8_t d2) {
@@ -43,16 +63,13 @@ static void dispatchEvent(uint8_t status, uint8_t d1, uint8_t d2) {
 
     if (msgType == 0x90 && d2 > 0) {
         // Note On
-        MidiEvent event{MidiEventType::NOTE_ON, d1, d2};
-        multicore_fifo_push_blocking(event.pack());
+        pushEvent(MidiEvent{MidiEventType::NOTE_ON, d1, d2});
     } else if (msgType == 0x80 || (msgType == 0x90 && d2 == 0)) {
         // Note Off (explicit or velocity-0 convention)
-        MidiEvent event{MidiEventType::NOTE_OFF, d1, d2};
-        multicore_fifo_push_blocking(event.pack());
+        pushEvent(MidiEvent{MidiEventType::NOTE_OFF, d1, d2});
     } else if (msgType == 0xB0) {
         // Control Change
-        MidiEvent event{MidiEventType::CC, d1, d2};
-        multicore_fifo_push_blocking(event.pack());
+        pushEvent(MidiEvent{MidiEventType::CC, d1, d2});
     }
 }
 

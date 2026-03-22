@@ -7,7 +7,7 @@ The supersaw-midi-synth is a 4-voice polyphonic MIDI-controlled synthesizer runn
 ## Signal Flow
 
 ```
-MIDI IN (UART1 RX) → MIDI Parser → Multicore FIFO → Voice Allocator
+MIDI IN (UART1 RX) → MIDI Parser → Software Ring Buffer → Voice Allocator
                                                          ↓
                                           ┌──────────────┴──────────────┐
                                      Core 0: Voices 0–1          Core 1: Voices 2–3
@@ -22,7 +22,7 @@ MIDI IN (UART1 RX) → MIDI Parser → Multicore FIFO → Voice Allocator
 - Initializes all peripherals (stdio, I2S audio, supersaw)
 - Launches core 1
 - Runs the main loop:
-  1. Drains pending MIDI events from the multicore FIFO
+  1. Drains pending MIDI events from the software ring buffer
   2. Dispatches note on/off to the voice allocator and CC messages to parameter update
   3. Takes an audio buffer from the I2S pool (blocks until available)
   4. Signals Core 1 to render voices 2–3 via a shared volatile flag
@@ -35,7 +35,7 @@ MIDI IN (UART1 RX) → MIDI Parser → Multicore FIFO → Voice Allocator
 - Initializes UART1 for MIDI reception
 - Continuously polls for incoming MIDI bytes
 - Parses note on/off and control change messages via a state machine
-- Pushes typed `MidiEvent` structs through the multicore FIFO
+- Pushes typed `MidiEvent` structs through the software ring buffer
 - Between MIDI polls, checks for a render command from Core 0
 - When signaled, renders voices 2–3 into a shared scratch buffer and signals completion
 
@@ -43,7 +43,7 @@ MIDI IN (UART1 RX) → MIDI Parser → Multicore FIFO → Voice Allocator
 
 ### MIDI Events
 
-MIDI events use the RP2040's hardware multicore FIFO (single-producer, single-consumer). Each event is packed into a 32-bit word:
+MIDI events use a lock-free, single-producer, single-consumer software ring buffer (256 elements deep). Each event is packed into a 32-bit word:
 
 ```
 Bits [17:16]  event type  (NOTE_ON / NOTE_OFF / CC)
@@ -51,7 +51,7 @@ Bits [14:8]   param1      (note number or CC number)
 Bits [6:0]    param2      (velocity or CC value)
 ```
 
-Core 1 pushes events, core 0 pops and dispatches them. The FIFO is lock-free and interrupt-safe.
+Core 1 pushes events, core 0 pops and dispatches them. The ring buffer is lock-free and cross-core safe using memory barriers.
 
 ### Voice Render Synchronization
 

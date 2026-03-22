@@ -25,7 +25,7 @@ The alternative (raw PIO I2S) would give more control but significantly more cod
 - **Core 0**: Audio rendering (time-critical, blocks on DMA buffer availability)
 - **Core 1**: MIDI polling (latency-sensitive, must not be blocked by audio)
 
-This prevents MIDI input from being starved when audio rendering is busy waiting for buffers. Inter-core communication uses the RP2040's hardware multicore FIFO — a lock-free, single-producer/single-consumer queue that avoids the overhead of mutexes. Each MIDI event is packed into a single 32-bit FIFO word.
+This prevents MIDI input from being starved when audio rendering is busy waiting for buffers. Inter-core communication uses a lock-free, single-producer/single-consumer software ring buffer (256 elements deep) that avoids the overhead of mutexes and prevents the cores from deadlocking if the queue temporarily fills during rendering. Each MIDI event is packed into a single 32-bit word.
 
 ## 7 Oscillators × 4 Voices
 
@@ -117,6 +117,8 @@ The stable hardware division logic makes bypass and crossfade logic obsolete. Th
 ## Stereo Chorus
 
 The JP-8000 generates its supersaw in mono and creates stereo width via a downstream chorus effect. This implementation adds a stereo chorus after the voice mix stage. Two delay lines (L and R) are modulated by a triangle LFO with 90° phase offset between channels. The LFO waveform is pre-computed as a 256-entry lookup table stored in flash (512 bytes), indexed by a 32-bit phase accumulator — no runtime branching for waveform generation. Delay buffers are 1024 samples (power-of-two for efficient bitmask wrapping), consuming ~4.1 KB RAM. The chorus depth defaults to 0 (dry/bypass) so existing patches are unaffected until CC 91 is sent.
+
+The modulated delay time is computed in Q8 fixed-point (8 fractional bits) so that the sub-sample position used for linear interpolation is derived directly from the delay calculation rather than from unrelated LFO phase bits. This eliminates phase-discontinuity artifacts that would otherwise occur each time the integer delay steps by one sample — particularly audible on higher frequencies where a single-sample jump represents a large phase change.
 
 ## Dual-Core Voice Rendering
 
