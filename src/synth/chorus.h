@@ -24,6 +24,10 @@ struct StereoChorus {
     uint32_t lfoPhase;
     uint32_t lfoInc;   // phase increment per sample (controls rate)
 
+    // Allpass interpolation state (one sample memory per channel)
+    int16_t apStateL;
+    int16_t apStateR;
+
     uint8_t depth;     // wet/dry mix, 0–127 (CC 91)
     uint8_t rate;      // LFO rate, 0–127 (CC 92)
 

@@ -52,6 +52,8 @@ void StereoChorus::init() {
     memset(delayBufR, 0, sizeof(delayBufR));
     writeIdx = 0;
     lfoPhase = 0;
+    apStateL = 0;
+    apStateR = 0;
 
     // Default: depth = 0 (dry), rate = ~1 Hz
     depth = 0;
@@ -82,44 +84,70 @@ void StereoChorus::process(int16_t& left, int16_t& right) {
     // Advance LFO phase
     lfoPhase += lfoInc;
 
-    // Read LFO value for L channel (upper 8 bits index table)
+    // Read LFO value for L channel with interpolation to eliminate staircase.
+    // Upper 8 bits index the table, next 8 bits are the interpolation fraction.
     uint8_t idxL = static_cast<uint8_t>(lfoPhase >> 24);
-    int16_t lfoL = chorusLfoTable[idxL];
+    uint8_t fracLfoL = static_cast<uint8_t>(lfoPhase >> 16);
+    int32_t lfoL = chorusLfoTable[idxL]
+                 + (((chorusLfoTable[static_cast<uint8_t>(idxL + 1)] - chorusLfoTable[idxL]) * fracLfoL) >> 8);
 
     // R channel: 90° out of phase (offset by 64 in 256-entry table)
-    uint8_t idxR = static_cast<uint8_t>(idxL + 64);
-    int16_t lfoR = chorusLfoTable[idxR];
+    uint32_t phaseR = lfoPhase + (64u << 24);
+    uint8_t idxR = static_cast<uint8_t>(phaseR >> 24);
+    uint8_t fracLfoR = static_cast<uint8_t>(phaseR >> 16);
+    int32_t lfoR = chorusLfoTable[idxR]
+                 + (((chorusLfoTable[static_cast<uint8_t>(idxR + 1)] - chorusLfoTable[idxR]) * fracLfoR) >> 8);
 
-    // Convert LFO (0–32767) to delay offset in samples (0–DELAY_SWEEP*2)
-    // delaySamples = DELAY_CENTER + ((lfo - 16384) * DELAY_SWEEP) >> 14
-    int32_t delayL = DELAY_CENTER + ((static_cast<int32_t>(lfoL) - 16384) * DELAY_SWEEP >> 14);
-    int32_t delayR = DELAY_CENTER + ((static_cast<int32_t>(lfoR) - 16384) * DELAY_SWEEP >> 14);
+    // Convert LFO (0–32767) to delay in Q8 fixed-point (8 fractional bits).
+    // >> 6 instead of >> 14 retains 8 sub-sample bits for smooth interpolation.
+    int32_t delayL_q8 = (static_cast<int32_t>(DELAY_CENTER) << 8)
+                      + (((static_cast<int32_t>(lfoL) - 16384) * DELAY_SWEEP) >> 6);
+    int32_t delayR_q8 = (static_cast<int32_t>(DELAY_CENTER) << 8)
+                      + (((static_cast<int32_t>(lfoR) - 16384) * DELAY_SWEEP) >> 6);
 
-    // Clamp delay to valid range
-    if (delayL < 1) delayL = 1;
-    if (delayL >= CHORUS_BUF_SIZE - 1) delayL = CHORUS_BUF_SIZE - 2;
-    if (delayR < 1) delayR = 1;
-    if (delayR >= CHORUS_BUF_SIZE - 1) delayR = CHORUS_BUF_SIZE - 2;
+    // Split into integer delay and fractional part
+    int32_t delayL = delayL_q8 >> 8;
+    uint8_t fracL  = static_cast<uint8_t>(delayL_q8 & 0xFF);
+    int32_t delayR = delayR_q8 >> 8;
+    uint8_t fracR  = static_cast<uint8_t>(delayR_q8 & 0xFF);
 
-    // Read from delay buffer with linear interpolation using fractional LFO bits
-    // Fractional part from bits 16–23 of lfoPhase (8-bit fraction, Q8)
-    uint8_t fracL = static_cast<uint8_t>(lfoPhase >> 16);
-    uint8_t fracR = static_cast<uint8_t>((lfoPhase + (64u << 24)) >> 16);
+    // Clamp integer delay to valid range
+    if (delayL < 1) { delayL = 1; fracL = 0; }
+    if (delayL >= CHORUS_BUF_SIZE - 1) { delayL = CHORUS_BUF_SIZE - 2; fracL = 0; }
+    if (delayR < 1) { delayR = 1; fracR = 0; }
+    if (delayR >= CHORUS_BUF_SIZE - 1) { delayR = CHORUS_BUF_SIZE - 2; fracR = 0; }
 
+    // Allpass interpolation: smoother frequency response than linear.
+    // Coefficient a = (256 - frac) / (256 + frac), approximated in Q8.
+    // y[n] = a * (x[n] - y[n-1]) + x[n-1]
     uint16_t readIdxL0 = (writeIdx - static_cast<uint16_t>(delayL)) & CHORUS_BUF_MASK;
     uint16_t readIdxL1 = (readIdxL0 - 1) & CHORUS_BUF_MASK;
-    int32_t wetL = delayBufL[readIdxL0] + ((static_cast<int32_t>(delayBufL[readIdxL1] - delayBufL[readIdxL0]) * fracL) >> 8);
+    int32_t xL = static_cast<int32_t>(delayBufL[readIdxL0]);
+    int32_t xL1 = static_cast<int32_t>(delayBufL[readIdxL1]);
+    int32_t aL = ((256 - fracL) * 256) / (256 + fracL); // Q8 coefficient
+    int32_t wetL = (aL * (xL - apStateL) + (xL1 << 8)) >> 8;
+    apStateL = static_cast<int16_t>(wetL);
 
     uint16_t readIdxR0 = (writeIdx - static_cast<uint16_t>(delayR)) & CHORUS_BUF_MASK;
     uint16_t readIdxR1 = (readIdxR0 - 1) & CHORUS_BUF_MASK;
-    int32_t wetR = delayBufR[readIdxR0] + ((static_cast<int32_t>(delayBufR[readIdxR1] - delayBufR[readIdxR0]) * fracR) >> 8);
+    int32_t xR = static_cast<int32_t>(delayBufR[readIdxR0]);
+    int32_t xR1 = static_cast<int32_t>(delayBufR[readIdxR1]);
+    int32_t aR = ((256 - fracR) * 256) / (256 + fracR); // Q8 coefficient
+    int32_t wetR = (aR * (xR - apStateR) + (xR1 << 8)) >> 8;
+    apStateR = static_cast<int16_t>(wetR);
 
-    // Wet/dry mix: depth 0 = fully dry, depth 127 = fully wet
-    // out = dry + (wet - dry) * depth / 127
+    // Additive wet/dry mix: dry signal always present, wet added on top.
+    // out = dry + wet * depth / 128 (clamped to int16_t)
     int32_t dryL = left;
     int32_t dryR = right;
-    left  = static_cast<int16_t>(dryL + (((wetL - dryL) * depth) >> 7));
-    right = static_cast<int16_t>(dryR + (((wetR - dryR) * depth) >> 7));
+    int32_t mixL = dryL + ((wetL * depth) >> 7);
+    int32_t mixR = dryR + ((wetR * depth) >> 7);
+    if (mixL > 32767)  mixL = 32767;
+    if (mixL < -32768) mixL = -32768;
+    if (mixR > 32767)  mixR = 32767;
+    if (mixR < -32768) mixR = -32768;
+    left  = static_cast<int16_t>(mixL);
+    right = static_cast<int16_t>(mixR);
 
     // Advance write position
     writeIdx = (writeIdx + 1) & CHORUS_BUF_MASK;

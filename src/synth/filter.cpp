@@ -32,7 +32,7 @@ void SVFilter::init() {
     dampCoeff = 32768;                    // Q=0.5 (no resonance)
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
-    D = (1 << 14) + ((2LL * R * g) >> 14) + ((1LL * g * g) >> 14);
+    D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
     mode = FilterMode::LPF;
 }
 
@@ -41,7 +41,7 @@ void SVFilter::setCutoff(uint8_t cc) {
     cutoffCoeff = filterCutoffTable[cc];
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
-    D = (1 << 14) + ((2LL * R * g) >> 14) + ((1LL * g * g) >> 14);
+    D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
 }
 
 void SVFilter::setResonance(uint8_t cc) {
@@ -51,7 +51,7 @@ void SVFilter::setResonance(uint8_t cc) {
     dampCoeff = 32768 - (static_cast<int32_t>(cc) * 31949) / 127;
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
-    D = (1 << 14) + ((2LL * R * g) >> 14) + ((1LL * g * g) >> 14);
+    D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
 }
 
 void SVFilter::setMode(uint8_t cc) {
@@ -76,7 +76,7 @@ void SVFilter::process(int16_t& left, int16_t& right) {
     int32_t D_half = D >> 1;
 
     // Left channel ZDF Trapezoidal SVF
-    int32_t hp_num_L = in_l - ((R * s1_L) >> 13) - ((g * s1_L) >> 14) - s2_L;
+    int32_t hp_num_L = in_l - ((R * s1_L) >> 14) - ((g * s1_L) >> 14) - s2_L;
     int32_t hp_L = hw_divider_quotient_s32(hp_num_L << 13, D_half);
     int32_t v1_L = (g * hp_L) >> 14;
     int32_t bp_L = v1_L + s1_L;
@@ -91,7 +91,7 @@ void SVFilter::process(int16_t& left, int16_t& right) {
     if (s2_L < -32768) s2_L = -32768;
 
     // Right channel ZDF Trapezoidal SVF
-    int32_t hp_num_R = in_r - ((R * s1_R) >> 13) - ((g * s1_R) >> 14) - s2_R;
+    int32_t hp_num_R = in_r - ((R * s1_R) >> 14) - ((g * s1_R) >> 14) - s2_R;
     int32_t hp_R = hw_divider_quotient_s32(hp_num_R << 13, D_half);
     int32_t v1_R = (g * hp_R) >> 14;
     int32_t bp_R = v1_R + s1_R;

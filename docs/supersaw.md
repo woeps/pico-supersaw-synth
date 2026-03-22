@@ -209,18 +209,19 @@ Two modulated delay lines (L and R) with:
 
 - **Delay center:** 10 ms (441 samples)
 - **Delay sweep:** ±5 ms (±220 samples), giving a 5–15 ms range
-- **LFO:** Pre-computed 256-entry triangle wave table (stored in flash, 512 bytes). A 32-bit phase accumulator indexes the table.
+- **LFO:** Pre-computed 256-entry triangle wave table (stored in flash, 512 bytes). A 32-bit phase accumulator indexes the table, with **8-bit linear interpolation** between adjacent entries to eliminate staircase artifacts in the delay modulation.
 - **L/R phase offset:** 90° (64 entries apart in the 256-entry table)
-- **Linear interpolation** on delay buffer reads for smooth modulation
+- **Allpass interpolation** on delay buffer reads for smooth, artifact-free modulation. The first-order allpass (`a = (1 − d) / (1 + d)`) provides unity gain at all frequencies and a flat group delay, avoiding the time-varying low-pass filtering inherent in linear interpolation. The coefficient division uses the RP2040 hardware divider.
+- **Additive wet/dry mix:** The dry signal is always present and the wet (delayed) signal is added on top, scaled by the depth parameter. Output is clamped to `int16_t` range. This ensures true chorus thickening at all depth settings, rather than crossfading into vibrato.
 
 ### MIDI Control
 
-- **CC 91 (Chorus Depth):** Wet/dry mix. 0 = fully dry (bypass), 127 = fully wet. Default: 0.
+- **CC 91 (Chorus Depth):** Wet amount added to dry signal. 0 = fully dry (bypass), 127 = maximum wet added. Default: 0.
 - **CC 92 (Chorus Rate):** LFO rate. 0 = ~0.1 Hz, 127 = ~3.0 Hz. Default: ~1 Hz.
 
 ### Memory
 
-- **RAM:** 2 × 1024 × 2 bytes (delay buffers, power-of-two for bitmask wrapping) + LFO state ≈ 4.1 KB
+- **RAM:** 2 × 1024 × 2 bytes (delay buffers, power-of-two for bitmask wrapping) + LFO state + 2 × `int16_t` allpass state ≈ 4.1 KB
 - **Flash:** 256 × 2 bytes (triangle LFO table) = 512 bytes
 
 ## Mixing and Normalization
