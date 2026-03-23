@@ -4,7 +4,7 @@ Simple MIDI-controlled supersaw synthesizer for Raspberry Pi Pico.
 
 ## Hardware
 
-- Raspberry Pi Pico (RP2040) microcontroller
+- Pimoroni Tiny2040 (RP2040) microcontroller
 - PCM5102A DAC
 - Serial MIDI-Input (UART)
 - Audio Output (TRS)
@@ -25,6 +25,7 @@ The only supported waveform is a supersaw, targeting up to 4 voices.
 - **Mix** (center vs. side oscillator balance)
 - **Spread**
 - **Chorus** (depth and rate)
+- **Filter** (cutoff, resonance, mode: LPF/BPF/HPF)
 
 ## Documentation
 

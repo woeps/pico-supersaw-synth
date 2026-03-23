@@ -46,4 +46,4 @@ picotool reboot
 
 ## Debug Output
 
-UART stdio is enabled on the default UART0 pins (GP0 TX, GP1 RX) at 115200 baud. Connect a USB-to-serial adapter to see debug messages.
+USB stdio is enabled (`pico_enable_stdio_usb`). Connect the Pico via USB and open a serial terminal (e.g. `minicom`, `screen`, or PuTTY) on the USB CDC ACM port to see debug messages.

@@ -70,7 +70,7 @@ The shared `bandCache` (wavetable SRAM cache) is protected by an RP2040 hardware
 | Module | Files | Purpose |
 |--------|-------|---------|
 | **synth** | `src/synth/supersaw.h/.cpp` | 4-voice polyphonic supersaw with ADSR envelope |
-| **synth** | `src/synth/filter.h/.cpp` | Resonant ZDF filter (HPF currently, post-mix) |
+| **synth** | `src/synth/filter.h/.cpp` | Resonant ZDF state-variable filter (LPF/BPF/HPF via CC 70, post-mix) |
 | **synth** | `src/synth/chorus.h/.cpp` | Stereo chorus effect (post-filter) |
 | **midi** | `src/midi/midi_input.h/.cpp` | UART MIDI parsing, event packing |
 | **audio** | `src/audio/audio_output.h/.cpp` | I2S output setup via pico_audio_i2s |
