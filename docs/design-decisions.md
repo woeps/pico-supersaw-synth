@@ -104,7 +104,7 @@ At `noteOn()` time, the required octave band is copied from flash into an SRAM c
 
 ## ZDF Trapezoidal Filter
 
-A global 2-pole Zero-Delay Feedback (ZDF) Trapezoidal state-variable filter is applied post-mix, before the stereo chorus. This placement (single instance rather than per-voice) keeps the CPU cost minimal while still providing the classic resonant filter sweep central to supersaw patches. Currently, only the high-pass (HPF) mode is wired up for output, but the internal states inherently compute band-pass (BPF) and low-pass (LPF) signals simultaneously, allowing for easy expansion.
+A global 2-pole Zero-Delay Feedback (ZDF) Trapezoidal state-variable filter is applied post-mix, before the stereo chorus. This placement (single instance rather than per-voice) keeps the CPU cost minimal while still providing the classic resonant filter sweep central to supersaw patches. The SVF topology inherently computes low-pass (LPF), band-pass (BPF), and high-pass (HPF) outputs simultaneously from the same difference equation. A `switch` on the `FilterMode` enum selects which output is routed to the audio path, so all three modes share the same computation with zero additional cost. The mode is selected via MIDI CC 70 (0–42 = LPF, 43–84 = BPF, 85–127 = HPF).
 
 The filter completely bypasses oversampling by leveraging the SIO hardware divider on the RP2040. The ZDF topology guarantees perfect stability up to the Nyquist limit even at high resonance and cutoff frequencies.
 

@@ -81,7 +81,7 @@ void SVFilter::process(int16_t& left, int16_t& right) {
     int32_t v1_L = (g * hp_L) >> 14;
     int32_t bp_L = v1_L + s1_L;
     int32_t v2_L = (g * bp_L) >> 14;
-    // int32_t lp_L = v2_L + s2_L; // Prepared for future LPF mode!
+    int32_t lp_L = v2_L + s2_L;
 
     s1_L += 2 * v1_L;
     if (s1_L >  32767) s1_L =  32767;
@@ -96,7 +96,7 @@ void SVFilter::process(int16_t& left, int16_t& right) {
     int32_t v1_R = (g * hp_R) >> 14;
     int32_t bp_R = v1_R + s1_R;
     int32_t v2_R = (g * bp_R) >> 14;
-    // int32_t lp_R = v2_R + s2_R; // Prepared for future LPF mode!
+    int32_t lp_R = v2_R + s2_R;
 
     s1_R += 2 * v1_R;
     if (s1_R >  32767) s1_R =  32767;
@@ -109,15 +109,16 @@ void SVFilter::process(int16_t& left, int16_t& right) {
     int32_t outL, outR;
     switch (mode) {
         case FilterMode::HPF:
-        case FilterMode::BPF:
-        default: // LPF
-            // For now, only HPF is supported as per the plan
             outL = hp_L << 1;
             outR = hp_R << 1;
-            // outL = bp_L << 1;
-            // outR = bp_R << 1;
-            // outL = lp_L << 1;
-            // outR = lp_R << 1;
+            break;
+        case FilterMode::BPF:
+            outL = bp_L << 1;
+            outR = bp_R << 1;
+            break;
+        default: // LPF
+            outL = lp_L << 1;
+            outR = lp_R << 1;
             break;
     }
 
