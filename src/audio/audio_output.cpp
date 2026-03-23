@@ -1,6 +1,5 @@
 #include "audio/audio_output.h"
 #include "config/pins.h"
-#include "hardware/resets.h"
 #include <cstdio>
 
 namespace audio {
@@ -8,10 +7,6 @@ namespace audio {
 static struct audio_buffer_pool* audioPool = nullptr;
 
 void audioInit() {
-    // Hard-reset PIO0 and DMA to clear any running state from SWD soft-reset
-    reset_block(RESETS_RESET_PIO0_BITS | RESETS_RESET_PIO1_BITS | RESETS_RESET_DMA_BITS);
-    unreset_block_wait(RESETS_RESET_PIO0_BITS | RESETS_RESET_PIO1_BITS | RESETS_RESET_DMA_BITS);
-
     static audio_format_t audioFormat = {
         .sample_freq = SAMPLE_RATE,
         .format = AUDIO_BUFFER_FORMAT_PCM_S16,

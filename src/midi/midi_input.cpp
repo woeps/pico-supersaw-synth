@@ -30,11 +30,6 @@ void midiInit(uart_inst_t* uart, uint rxPin) {
     gpio_set_function(rxPin, GPIO_FUNC_UART);
 
     // 8N1 is the default for uart_init, no extra config needed
-    
-    // Flush any garbage received during initialization
-    while (uart_is_readable(midiUart)) {
-        uart_getc(midiUart);
-    }
 }
 
 bool midiEventAvailable() {

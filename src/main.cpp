@@ -5,6 +5,7 @@
 #include "hardware/gpio.h"
 #include "hardware/structs/ioqspi.h"
 #include "hardware/structs/sio.h"
+#include "hardware/resets.h"
 #include "hardware/structs/timer.h"
 #include "config/pins.h"
 #include "config/preset_store.h"
@@ -81,9 +82,21 @@ void core1_entry() {
     }
 }
 
-int main() {
-    // Clear debug pause to prevent timer/sleep hang after SWD reset
+
+// Recover from SWD debug flash/soft-reset by normalizing peripherals
+static void recover_from_swd_reset() {
+    // Un-pause the hardware timer (frozen by SWD halt) so sleep_ms() works
     timer_hw->dbgpause = 0;
+
+    // Hard-reset peripherals that might be left running by a previous session
+    uint32_t reset_mask = RESETS_RESET_PIO0_BITS | RESETS_RESET_PIO1_BITS | 
+                          RESETS_RESET_DMA_BITS | RESETS_RESET_UART1_BITS;
+    reset_block(reset_mask);
+    unreset_block_wait(reset_mask);
+}
+
+int main() {
+    recover_from_swd_reset();
 
     stdio_init_all();
     printf("Supersaw MIDI Synth starting...\n");
