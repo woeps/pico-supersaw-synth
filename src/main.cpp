@@ -5,6 +5,7 @@
 #include "hardware/gpio.h"
 #include "hardware/structs/ioqspi.h"
 #include "hardware/structs/sio.h"
+#include "hardware/structs/timer.h"
 #include "config/pins.h"
 #include "config/preset_store.h"
 #include "synth/supersaw.h"
@@ -81,6 +82,9 @@ void core1_entry() {
 }
 
 int main() {
+    // Clear debug pause to prevent timer/sleep hang after SWD reset
+    timer_hw->dbgpause = 0;
+
     stdio_init_all();
     printf("Supersaw MIDI Synth starting...\n");
     
@@ -104,10 +108,12 @@ int main() {
         printf("Preset restored from flash.\n");
     }
 
-    audio::audioInit();
-
+    multicore_reset_core1();
+    sleep_ms(100); // Required for Core 1 to properly start after SWD flash
     multicore_launch_core1(core1_entry);
     printf("Core 1 launched (MIDI input + voice rendering).\n");
+
+    audio::audioInit();
 
     struct audio_buffer_pool* pool = audio::getAudioBufferPool();
 
