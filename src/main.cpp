@@ -200,37 +200,10 @@ int main() {
         }
 
         // ── LED control ──────────────────────────────────────────────
-        switch (btnState) {
-            case ButtonState::BLINK_RED: {
-                bool on = ((nowMs / BLINK_PERIOD_MS) & 1) == 0;
-                gpio_put(LED_RED_PIN, on ? 1 : 0);
-                gpio_put(LED_GREEN_PIN, 0);
-                gpio_put(LED_BLUE_PIN, 0);
-                break;
-            }
-            case ButtonState::FLASH_GREEN:
-                gpio_put(LED_RED_PIN, 0);
-                gpio_put(LED_GREEN_PIN, 1);
-                gpio_put(LED_BLUE_PIN, 0);
-                break;
-            case ButtonState::FLASH_BLUE:
-                gpio_put(LED_RED_PIN, 0);
-                gpio_put(LED_GREEN_PIN, 0);
-                gpio_put(LED_BLUE_PIN, 1);
-                break;
-            default:
-                // Normal LED: green while any voice is active
-                if (supersaw.anyVoiceActive()) {
-                    gpio_put(LED_RED_PIN, 0);
-                    gpio_put(LED_GREEN_PIN, 1);
-                    gpio_put(LED_BLUE_PIN, 0);
-                } else {
-                    gpio_put(LED_RED_PIN, 0);
-                    gpio_put(LED_GREEN_PIN, 0);
-                    gpio_put(LED_BLUE_PIN, 0);
-                }
-                break;
-        }
+        // Always blue
+        gpio_put(LED_RED_PIN, 0);
+        gpio_put(LED_GREEN_PIN, 0);
+        gpio_put(LED_BLUE_PIN, 1);
 
         // Get an audio buffer from the pool (blocks until available)
         struct audio_buffer* buffer = take_audio_buffer(pool, true);

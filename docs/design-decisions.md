@@ -158,9 +158,11 @@ The Tiny2040's BOOTSEL button is repurposed as a save/restore trigger. It is not
 
 A hold-duration state machine runs in the main loop (polled once per audio buffer cycle):
 
-- **< 3 s release** → restore saved preset (blue LED flash)
-- **≥ 3 s hold** → red LED blink indicates save mode is armed
-- **≥ 5 s hold** → save current parameters (green LED flash)
+- **< 3 s release** → restore saved preset
+- **≥ 3 s hold** → save mode armed
+- **≥ 5 s hold** → save current parameters
+
+The onboard RGB LED is always blue, regardless of button state or voice activity.
 
 On boot, `preset_store::load()` checks the flash sector for a valid magic/version header and replays all CC values via `setCC()` before the audio loop starts.
 
