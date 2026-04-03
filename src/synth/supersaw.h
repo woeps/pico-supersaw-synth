@@ -9,6 +9,7 @@
 #include "synth/chorus.h"
 #include "synth/filter.h"
 #include "synth/saw_wavetable.h"
+#include "synth/velocity_table.h"
 
 #define NUM_OSCILLATORS 7
 #define MAX_VOICES 4
@@ -40,6 +41,7 @@ struct Voice {
     uint32_t phase[NUM_OSCILLATORS];
     uint32_t phaseInc[NUM_OSCILLATORS];
     uint8_t  note;
+    uint8_t  velocity;   // MIDI velocity (0–127), used for logarithmic gain scaling
     bool     active;     // true while voice is sounding (including release)
     uint32_t age;        // incremented each noteOn for voice-stealing
     Envelope env;

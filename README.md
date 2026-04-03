@@ -75,3 +75,7 @@ Experiment and try to see what is possible to implement on the rp2040:
 - chorus
 - delay
 - reverb
+
+## Ideas
+
+- handle after-touch messages as filter cutoff modulation

@@ -136,6 +136,7 @@ void Voice::reset() {
     // produce organic variation between note triggers (JP-8000 behavior).
     memset(phaseInc, 0, sizeof(phaseInc));
     note = 0;
+    velocity = 0;
     active = false;
     age = 0;
     env.stage = EnvStage::IDLE;
@@ -253,13 +254,13 @@ void Supersaw::cacheRelease(int8_t bandIdx) {
 }
 
 void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
-    (void)velocity;
     if (note > 127) return;
 
     // Retrigger if this note is already active
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].active && voices[i].note == note) {
             voices[i].age = nextAge++;
+            voices[i].velocity = velocity;
             voices[i].env.gate(true);
             updateDetuneForVoice(voices[i]);
             return;
@@ -288,6 +289,7 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
     cacheRelease(voices[idx].cachedBandIdx);
     voices[idx].reset();
     voices[idx].note = note;
+    voices[idx].velocity = velocity;
     voices[idx].active = true;
     voices[idx].age = nextAge++;
     voices[idx].env.gate(true);
@@ -434,6 +436,11 @@ void Supersaw::renderVoiceSample(int startV, int endV,
         int32_t envMul = static_cast<int32_t>(envLevel >> 16);
         voiceL = (voiceL * envMul) >> 16;
         voiceR = (voiceR * envMul) >> 16;
+
+        // Apply logarithmic velocity gain (Q8: 256 = unity)
+        int32_t velGain = static_cast<int32_t>(velocityGainTable[voice.velocity]);
+        voiceL = (voiceL * velGain) >> 8;
+        voiceR = (voiceR * velGain) >> 8;
 
         outL += voiceL;
         outR += voiceR;
