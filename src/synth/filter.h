@@ -30,6 +30,7 @@ struct SVFilter {
     int32_t dampCoeff;     // Q14, derived from resonance CC
     int32_t D;             // Denominator: 1 + 2Rg + g^2 (Q14)
     int32_t invD;          // Reciprocal: round(2^28 / D) (Q14)
+    int32_t resoCompGain;  // Q14 resonance gain compensation: min(16384, dampCoeff)
     FilterMode mode;
 
     void init();

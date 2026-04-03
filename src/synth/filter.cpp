@@ -34,6 +34,7 @@ void SVFilter::init() {
     int32_t R = dampCoeff;
     D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
     invD = ((1 << 28) + D / 2) / D;       // Q14 reciprocal of D
+    resoCompGain = 16384;                  // Q14 unity (no compensation at Q=0.5)
     mode = FilterMode::LPF;
 }
 
@@ -58,6 +59,12 @@ void SVFilter::setResonance(uint8_t cc) {
     int32_t R = dampCoeff;
     D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
     invD = ((1 << 28) + D / 2) / D;
+    // Resonance gain compensation: attenuate input by 1/Q when Q > 1
+    // to prevent the resonance peak from exceeding 0 dB.
+    // dampCoeff = 2R (Q14), Q = 1/(2R) = 16384/dampCoeff.
+    // When Q <= 1 (dampCoeff >= 16384): no attenuation.
+    // When Q > 1 (dampCoeff < 16384): attenuate by dampCoeff/16384.
+    resoCompGain = (dampCoeff < 16384) ? dampCoeff : 16384;
 }
 
 void SVFilter::setMode(uint8_t cc) {
@@ -71,11 +78,13 @@ void SVFilter::setMode(uint8_t cc) {
 }
 
 void SVFilter::process(int16_t& left, int16_t& right) {
-    // Scale input to Q28: >>1 for 2× headroom, <<14 for 14 extra
-    // fractional bits.  Net shift: <<13.  This eliminates the
-    // truncation dead-zone that silenced the LP output at low cutoff.
-    int32_t in_l = static_cast<int32_t>(left)  << 13;
-    int32_t in_r = static_cast<int32_t>(right) << 13;
+    // Scale input to Q28 with resonance gain compensation.
+    // Original: left << 13 (net shift for Q28 headroom).
+    // With compensation: (left * resoCompGain) >> 1, because
+    // resoCompGain is Q14, so left * Q14 >> (14-13) = >> 1.
+    // At unity (resoCompGain=16384): (left * 16384) >> 1 = left << 13.
+    int32_t in_l = (static_cast<int32_t>(left)  * resoCompGain) >> 1;
+    int32_t in_r = (static_cast<int32_t>(right) * resoCompGain) >> 1;
 
     int32_t g = cutoffCoeff;   // Q14
     int32_t R = dampCoeff;     // Q14

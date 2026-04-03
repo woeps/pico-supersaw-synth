@@ -116,11 +116,15 @@ The CC-to-frequency mapping uses a **piecewise-exponential curve** with a breakp
 
 Resonance is mapped linearly from CC 0 (Q=0.5) to CC 127 (Q≈8.0). The maximum Q is intentionally capped at ~8.0 because the ZDF topology becomes numerically unstable in fixed-point arithmetic at extreme Q values combined with high cutoff frequencies. Beyond this limit, quantization errors in the state variables accumulate and cause continuous self-oscillation (a high-pitched digital whine). Q≈8.0 provides a strong, musical resonant peak while maintaining absolute mathematical stability across the entire cutoff range.
 
+**Resonance gain compensation:** The SVF's LP gain at the resonance frequency is approximately Q. With 4 voices at full amplitude the pre-filter signal already reaches ~100% of int16_t range, so any Q > 1 would hard-clip the output. To prevent this, the filter input is attenuated by `min(1, 1/Q)` via a precomputed `resoCompGain` factor (Q14). When Q ≤ 1 (dampCoeff ≥ 16384) the input passes through at unity; when Q > 1 the input is scaled by `dampCoeff/16384`, keeping the resonance peak at 0 dB. This mirrors the behavior of classic Roland synths (e.g. Juno-106) where the passband drops as resonance increases.
+
 The stable hardware division logic makes bypass and crossfade logic obsolete. The filter computes perfectly and without artifacts even at maximum cutoff limits.
 
 ## Stereo Chorus
 
 The JP-8000 generates its supersaw in mono and creates stereo width via a downstream chorus effect. This implementation adds a stereo chorus after the voice mix stage. Two delay lines (L and R) are modulated by a triangle LFO with 90° phase offset between channels. The LFO waveform is pre-computed as a 256-entry lookup table stored in flash (512 bytes), indexed by a 32-bit phase accumulator — no runtime branching for waveform generation. Delay buffers are 1024 samples (power-of-two for efficient bitmask wrapping), consuming ~4.1 KB RAM. The chorus depth defaults to 0 (dry/bypass) so existing patches are unaffected until CC 91 is sent.
+
+The wet/dry mix uses a **crossfade** rather than additive blending: `out = dry × (128 − depth) / 128 + wet × depth / 128`. This guarantees the total gain never exceeds unity regardless of depth, preventing clipping when the pre-chorus signal is already near full scale.
 
 The modulated delay time is computed in Q8 fixed-point (8 fractional bits) so that the sub-sample position used for linear interpolation is derived directly from the delay calculation rather than from unrelated LFO phase bits. This eliminates phase-discontinuity artifacts that would otherwise occur each time the integer delay steps by one sample — particularly audible on higher frequencies where a single-sample jump represents a large phase change.
 
@@ -148,7 +152,7 @@ Volatile shared variables coordinate rendering — no FIFO or mutex overhead per
 
 ### Memory Cost
 
-The scratch buffer (`int32_t[512]`) adds ~2 KB RAM — negligible on the RP2040's 264 KB SRAM.
+Each core has its own `int32_t` scratch buffer (`core0ScratchBuf` and `core1ScratchBuf`, each `int32_t[512]`), adding ~4 KB RAM total. Both buffers use `int32_t` to preserve full dynamic range from partial 2-voice sums — clamping to `int16_t` is deferred until after the final merge and ÷2 normalization, preventing premature hard-clipping when multiple voices are at high amplitude. The ÷2 (not ÷4) is correct because the per-voice `×10579 >> 16` normalization already limits each voice to ~16384 (half of `int16_t` range), so four voices sum to ~65536 and only a single right-shift is needed.
 
 ## Preset Persistence via Flash
 

@@ -108,9 +108,9 @@ int main() {
     gpio_set_dir(LED_RED_PIN, GPIO_OUT);
     gpio_set_dir(LED_GREEN_PIN, GPIO_OUT);
     gpio_set_dir(LED_BLUE_PIN, GPIO_OUT);
-    gpio_put(LED_RED_PIN, 0);
-    gpio_put(LED_GREEN_PIN, 0);
-    gpio_put(LED_BLUE_PIN, 0);
+    gpio_put(LED_RED_PIN, 1);
+    gpio_put(LED_GREEN_PIN, 1);
+    gpio_put(LED_BLUE_PIN, 1);
 
     supersaw.init();
 
@@ -203,31 +203,31 @@ int main() {
         switch (btnState) {
             case ButtonState::BLINK_RED: {
                 bool on = ((nowMs / BLINK_PERIOD_MS) & 1) == 0;
-                gpio_put(LED_RED_PIN, on ? 1 : 0);
-                gpio_put(LED_GREEN_PIN, 0);
-                gpio_put(LED_BLUE_PIN, 0);
+                gpio_put(LED_RED_PIN, on ? 0 : 1);
+                gpio_put(LED_GREEN_PIN, 1);
+                gpio_put(LED_BLUE_PIN, 1);
                 break;
             }
             case ButtonState::FLASH_GREEN:
-                gpio_put(LED_RED_PIN, 0);
-                gpio_put(LED_GREEN_PIN, 1);
-                gpio_put(LED_BLUE_PIN, 0);
-                break;
-            case ButtonState::FLASH_BLUE:
-                gpio_put(LED_RED_PIN, 0);
+                gpio_put(LED_RED_PIN, 1);
                 gpio_put(LED_GREEN_PIN, 0);
                 gpio_put(LED_BLUE_PIN, 1);
+                break;
+            case ButtonState::FLASH_BLUE:
+                gpio_put(LED_RED_PIN, 1);
+                gpio_put(LED_GREEN_PIN, 1);
+                gpio_put(LED_BLUE_PIN, 0);
                 break;
             default:
                 // Normal LED: green while any voice is active
                 if (supersaw.anyVoiceActive()) {
-                    gpio_put(LED_RED_PIN, 0);
-                    gpio_put(LED_GREEN_PIN, 1);
-                    gpio_put(LED_BLUE_PIN, 0);
-                } else {
-                    gpio_put(LED_RED_PIN, 0);
+                    gpio_put(LED_RED_PIN, 1);
                     gpio_put(LED_GREEN_PIN, 0);
-                    gpio_put(LED_BLUE_PIN, 0);
+                    gpio_put(LED_BLUE_PIN, 1);
+                } else {
+                    gpio_put(LED_RED_PIN, 1);
+                    gpio_put(LED_GREEN_PIN, 1);
+                    gpio_put(LED_BLUE_PIN, 1);
                 }
                 break;
         }
@@ -242,6 +242,20 @@ int main() {
 
             buffer->sample_count = numStereoSamples;
             give_audio_buffer(pool, buffer);
+        }
+
+        // Debug: use red LED to indicate digital clipping at the merge stage.
+        // The LED stays red for 100 ms each time clipping is detected.
+        {
+            static uint32_t clipLedOffMs = 0;
+            if (supersaw.dbgClipCount > 0) {
+                supersaw.dbgClipCount = 0;
+                clipLedOffMs = nowMs + 100;
+            }
+            if (clipLedOffMs > nowMs) {
+                gpio_put(LED_RED_PIN, 0);   // active-low: 0 = ON
+                gpio_put(LED_GREEN_PIN, 1); // turn off green
+            }
         }
     }
 

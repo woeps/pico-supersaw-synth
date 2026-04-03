@@ -207,6 +207,8 @@ void Supersaw::init() {
     // Initialize dual-core rendering synchronization
     core1RenderCmd = 0;
     core1RenderDone = false;
+
+    dbgClipCount = 0;
     cacheLock = spin_lock_init(spin_lock_claim_unused(true));
 }
 
@@ -452,7 +454,7 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
     core1RenderDone = false;
     core1RenderCmd = numStereoSamples;
 
-    // Core 0: render voices 0–1 into output buffer (temporary partial mix)
+    // Core 0: render voices 0–1 into int32_t scratch buffer (no premature clamp)
     for (size_t i = 0; i < numStereoSamples; i++) {
         int32_t sampleL = 0;
         int32_t sampleR = 0;
@@ -473,14 +475,8 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
 
         renderVoiceSample(0, 2, sampleL, sampleR, currentMix);
 
-        // Clamp partial 2-voice sum to int16_t for temporary storage
-        if (sampleL > 32767) sampleL = 32767;
-        if (sampleL < -32768) sampleL = -32768;
-        if (sampleR > 32767) sampleR = 32767;
-        if (sampleR < -32768) sampleR = -32768;
-
-        buffer[i * 2]     = static_cast<int16_t>(sampleL);
-        buffer[i * 2 + 1] = static_cast<int16_t>(sampleR);
+        core0ScratchBuf[i * 2]     = sampleL;
+        core0ScratchBuf[i * 2 + 1] = sampleR;
     }
 
     // Wait for Core 1 to complete rendering voices 2–3
@@ -488,20 +484,40 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         tight_loop_contents();
     }
 
-    // Merge Core 1's scratch buffer, normalize, clamp, and apply chorus
+    // Merge both int32_t scratch buffers, normalize, clamp, and apply chorus
+    uint32_t localClips = 0;
     for (size_t i = 0; i < numStereoSamples; i++) {
-        int32_t sampleL = static_cast<int32_t>(buffer[i * 2])     + core1ScratchBuf[i * 2];
-        int32_t sampleR = static_cast<int32_t>(buffer[i * 2 + 1]) + core1ScratchBuf[i * 2 + 1];
+        int32_t sampleL = core0ScratchBuf[i * 2]     + core1ScratchBuf[i * 2];
+        int32_t sampleR = core0ScratchBuf[i * 2 + 1] + core1ScratchBuf[i * 2 + 1];
 
-        // Divide by MAX_VOICES to prevent clipping with full polyphony
-        sampleL >>= 2;
-        sampleR >>= 2;
+        // Divide by 2: each voice is already normalized to ~16384 (half of
+        // int16_t range) by the ×10579>>16 factor in renderVoiceSample, so
+        // four voices sum to ~65536 and only a ÷2 is needed to fit int16_t.
+        sampleL >>= 1;
+        sampleR >>= 1;
 
-        // Clamp to int16_t range
-        if (sampleL > 32767) sampleL = 32767;
-        if (sampleL < -32768) sampleL = -32768;
-        if (sampleR > 32767) sampleR = 32767;
-        if (sampleR < -32768) sampleR = -32768;
+        // Soft limiter: 2:1 compression above 75% of full scale.
+        // Preserves full dynamics for 1–3 voices; gently tames 4-voice
+        // peaks so the filter and DAC have ~3 dB of headroom.
+        // Max output: 24576 + (32768−24576)/2 = 28672 (87.5%).
+        // Cost: 2 compares + 1 sub + 1 shift per channel.
+        static constexpr int32_t SOFT_THRESH = 24576; // 75% of 32767
+        if (sampleL > SOFT_THRESH) {
+            sampleL = SOFT_THRESH + ((sampleL - SOFT_THRESH) >> 1);
+        } else if (sampleL < -SOFT_THRESH) {
+            sampleL = -SOFT_THRESH + ((sampleL + SOFT_THRESH) >> 1);
+        }
+        if (sampleR > SOFT_THRESH) {
+            sampleR = SOFT_THRESH + ((sampleR - SOFT_THRESH) >> 1);
+        } else if (sampleR < -SOFT_THRESH) {
+            sampleR = -SOFT_THRESH + ((sampleR + SOFT_THRESH) >> 1);
+        }
+
+        // Clamp to int16_t range (safety net — soft limiter caps at 28672)
+        if (sampleL > 32767) { sampleL = 32767; localClips++; }
+        if (sampleL < -32768) { sampleL = -32768; localClips++; }
+        if (sampleR > 32767) { sampleR = 32767; localClips++; }
+        if (sampleR < -32768) { sampleR = -32768; localClips++; }
 
         int16_t outL = static_cast<int16_t>(sampleL);
         int16_t outR = static_cast<int16_t>(sampleR);
@@ -515,6 +531,7 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         buffer[i * 2]     = outL;
         buffer[i * 2 + 1] = outR;
     }
+    dbgClipCount += localClips;
 }
 
 void Supersaw::renderCore1Voices(size_t numStereoSamples) {

@@ -91,8 +91,9 @@ struct Supersaw {
     StereoChorus chorus;
     SVFilter filter;
 
-    // Dual-core voice rendering: Core 1 writes its partial mix here.
+    // Dual-core voice rendering: each core writes its partial mix here.
     // Sized for max buffer (stereo pairs as int32_t to avoid overflow from 2-voice sum).
+    int32_t core0ScratchBuf[AUDIO_BUFFER_SAMPLES * 2];
     int32_t core1ScratchBuf[AUDIO_BUFFER_SAMPLES * 2];
 
     // Inter-core synchronization (volatile for cross-core visibility).
@@ -100,6 +101,9 @@ struct Supersaw {
     // core1RenderDone: set true by Core 1 when rendering is complete.
     volatile uint32_t core1RenderCmd;
     volatile bool core1RenderDone;
+
+    // Debug: lightweight clip counter (only Core 0 reads/writes).
+    uint32_t dbgClipCount;
 
     // Hardware spinlock for bandCache access (shared between cores).
     spin_lock_t* cacheLock;

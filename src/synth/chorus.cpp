@@ -136,12 +136,13 @@ void StereoChorus::process(int16_t& left, int16_t& right) {
     int32_t wetR = (aR * (xR - apStateR) + (xR1 << 8)) >> 8;
     apStateR = static_cast<int16_t>(wetR);
 
-    // Additive wet/dry mix: dry signal always present, wet added on top.
-    // out = dry + wet * depth / 128 (clamped to int16_t)
+    // Crossfade wet/dry mix: total gain never exceeds unity.
+    // out = dry * (128 - depth) / 128 + wet * depth / 128
     int32_t dryL = left;
     int32_t dryR = right;
-    int32_t mixL = dryL + ((wetL * depth) >> 7);
-    int32_t mixR = dryR + ((wetR * depth) >> 7);
+    int32_t dryAmt = 128 - static_cast<int32_t>(depth);
+    int32_t mixL = (dryL * dryAmt + wetL * depth) >> 7;
+    int32_t mixR = (dryR * dryAmt + wetR * depth) >> 7;
     if (mixL > 32767)  mixL = 32767;
     if (mixL < -32768) mixL = -32768;
     if (mixR > 32767)  mixR = 32767;

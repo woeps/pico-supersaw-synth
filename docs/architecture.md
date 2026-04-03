@@ -13,7 +13,7 @@ MIDI IN (UART1 RX) → MIDI Parser → Software Ring Buffer → Voice Allocator
                                      Core 0: Voices 0–1          Core 1: Voices 2–3
                                           └──────────────┬──────────────┘
                                                          ↓
-                                                   Merge & ÷4 → ZDF Filter → Stereo Chorus → I2S Audio Out → PCM5102A DAC
+                                                   Merge & ÷2 → ZDF Filter (reso-compensated) → Stereo Chorus (crossfade) → I2S Audio Out → PCM5102A DAC
 ```
 
 ## Dual-Core Layout
@@ -26,9 +26,9 @@ MIDI IN (UART1 RX) → MIDI Parser → Software Ring Buffer → Voice Allocator
   2. Dispatches note on/off to the voice allocator and CC messages to parameter update
   3. Takes an audio buffer from the I2S pool (blocks until available)
   4. Signals Core 1 to render voices 2–3 via a shared volatile flag
-  5. Renders voices 0–1 into the output buffer (with per-sample parameter smoothing)
+  5. Renders voices 0–1 into an int32_t scratch buffer (with per-sample parameter smoothing)
   6. Waits for Core 1 to finish
-  7. Merges Core 1's scratch buffer, applies ÷4 normalization, clamp, and stereo chorus
+  7. Merges both int32_t scratch buffers, applies ÷2 normalization, clamp, filter, and stereo chorus
   8. Submits the buffer for DMA playback
 
 ### Core 1 — MIDI Input & Voices 2–3
@@ -59,6 +59,7 @@ Voice rendering is split equally across both cores using volatile shared variabl
 
 - `core1RenderCmd` — Core 0 writes the buffer sample count to trigger Core 1 rendering
 - `core1RenderDone` — Core 1 sets this flag when its voices are rendered
+- `core0ScratchBuf` — int32_t buffer where Core 0 writes its partial stereo mix
 - `core1ScratchBuf` — int32_t buffer where Core 1 writes its partial stereo mix
 
 Core 1 polls this flag alongside MIDI, ensuring sub-microsecond response to render requests. No FIFO or mutex is needed — volatile is sufficient on Cortex-M0+ (no data cache, no out-of-order execution).
