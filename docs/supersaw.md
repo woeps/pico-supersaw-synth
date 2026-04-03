@@ -182,7 +182,7 @@ The denominator (`D = 1 + 2Rg + g^2`) is precomputed whenever the Cutoff or Reso
 ### MIDI Control
 
 - **CC 74 (Filter Cutoff):** 0 = 20 Hz, 127 = 16 kHz. Default: 127.
-- **CC 71 (Filter Resonance):** 0 = flat (Q=0.5), 127 = high resonance (Q≈20). Default: 0.
+- **CC 71 (Filter Resonance):** 0 = flat (Q=0.5), 127 = high resonance (Q≈8.0). Default: 0. *(Note: Q is capped at ~8.0 because the fixed-point filter topology becomes numerically unstable and self-oscillates at more extreme Q values)*.
 - **CC 70 (Filter Mode):** 0–42 = LPF, 43–84 = BPF, 85–127 = HPF. Default: LPF. (Note: Only HPF is currently active on output).
 
 ### Memory & CPU

@@ -33,6 +33,7 @@ void SVFilter::init() {
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
     D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
+    invD = ((1 << 28) + D / 2) / D;       // Q14 reciprocal of D
     mode = FilterMode::LPF;
 }
 
@@ -42,16 +43,21 @@ void SVFilter::setCutoff(uint8_t cc) {
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
     D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
+    invD = ((1 << 28) + D / 2) / D;
 }
 
 void SVFilter::setResonance(uint8_t cc) {
     if (cc > 127) cc = 127;
-    // Linear map: CC 0 → damp=2.0 (Q=0.5), CC 127 → damp=0.05 (Q≈20).
-    // Q14: 32768 − (cc × 31949) / 127
-    dampCoeff = 32768 - (static_cast<int32_t>(cc) * 31949) / 127;
+    // Linear map: CC 0 → damp=2.0 (Q=0.5), CC 127 → damp=0.125 (Q≈8.0).
+    // The Q limit of ~8.0 is required because the filter becomes numerically
+    // unstable in fixed-point arithmetic at higher Q values (quantization noise
+    // causes continuous self-oscillation at extreme resonance).
+    // Q14: 32768 − (cc × 30720) / 127
+    dampCoeff = 32768 - (static_cast<int32_t>(cc) * 30720) / 127;
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
     D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);
+    invD = ((1 << 28) + D / 2) / D;
 }
 
 void SVFilter::setMode(uint8_t cc) {
@@ -65,60 +71,66 @@ void SVFilter::setMode(uint8_t cc) {
 }
 
 void SVFilter::process(int16_t& left, int16_t& right) {
-    // Attenuate input by 1 bit before the SVF to give state variables
-    // 2× headroom before hitting the ±32767 clamp.  This eliminates
-    // hard-clipping distortion at high cutoff coefficients.
-    int32_t in_l = static_cast<int32_t>(left)  >> 1;
-    int32_t in_r = static_cast<int32_t>(right) >> 1;
+    // Scale input to Q28: >>1 for 2× headroom, <<14 for 14 extra
+    // fractional bits.  Net shift: <<13.  This eliminates the
+    // truncation dead-zone that silenced the LP output at low cutoff.
+    int32_t in_l = static_cast<int32_t>(left)  << 13;
+    int32_t in_r = static_cast<int32_t>(right) << 13;
 
-    int32_t g = cutoffCoeff;
-    int32_t R = dampCoeff;
-    int32_t D_half = D >> 1;
+    int32_t g = cutoffCoeff;   // Q14
+    int32_t R = dampCoeff;     // Q14
 
-    // Left channel ZDF Trapezoidal SVF
-    int32_t hp_num_L = in_l - ((R * s1_L) >> 14) - ((g * s1_L) >> 14) - s2_L;
-    int32_t hp_L = hw_divider_quotient_s32(hp_num_L << 13, D_half);
-    int32_t v1_L = (g * hp_L) >> 14;
+    // ---- Left channel ZDF Trapezoidal SVF (Q28 internals) ----
+    int64_t hp_num_L = (int64_t)in_l
+                     - ((1LL * R * s1_L) >> 14)
+                     - ((1LL * g * s1_L) >> 14)
+                     - s2_L;
+    int32_t hp_L = static_cast<int32_t>((hp_num_L * invD) >> 14);
+    int32_t v1_L = static_cast<int32_t>(((int64_t)g * hp_L) >> 14);
     int32_t bp_L = v1_L + s1_L;
-    int32_t v2_L = (g * bp_L) >> 14;
+    int32_t v2_L = static_cast<int32_t>(((int64_t)g * bp_L) >> 14);
     int32_t lp_L = v2_L + s2_L;
 
     s1_L += 2 * v1_L;
-    if (s1_L >  32767) s1_L =  32767;
-    if (s1_L < -32768) s1_L = -32768;
+    if (s1_L >  STATE_MAX) s1_L =  STATE_MAX;
+    if (s1_L < -STATE_MAX) s1_L = -STATE_MAX;
     s2_L += 2 * v2_L;
-    if (s2_L >  32767) s2_L =  32767;
-    if (s2_L < -32768) s2_L = -32768;
+    if (s2_L >  STATE_MAX) s2_L =  STATE_MAX;
+    if (s2_L < -STATE_MAX) s2_L = -STATE_MAX;
 
-    // Right channel ZDF Trapezoidal SVF
-    int32_t hp_num_R = in_r - ((R * s1_R) >> 14) - ((g * s1_R) >> 14) - s2_R;
-    int32_t hp_R = hw_divider_quotient_s32(hp_num_R << 13, D_half);
-    int32_t v1_R = (g * hp_R) >> 14;
+    // ---- Right channel ZDF Trapezoidal SVF (Q28 internals) ----
+    int64_t hp_num_R = (int64_t)in_r
+                     - ((1LL * R * s1_R) >> 14)
+                     - ((1LL * g * s1_R) >> 14)
+                     - s2_R;
+    int32_t hp_R = static_cast<int32_t>((hp_num_R * invD) >> 14);
+    int32_t v1_R = static_cast<int32_t>(((int64_t)g * hp_R) >> 14);
     int32_t bp_R = v1_R + s1_R;
-    int32_t v2_R = (g * bp_R) >> 14;
+    int32_t v2_R = static_cast<int32_t>(((int64_t)g * bp_R) >> 14);
     int32_t lp_R = v2_R + s2_R;
 
     s1_R += 2 * v1_R;
-    if (s1_R >  32767) s1_R =  32767;
-    if (s1_R < -32768) s1_R = -32768;
+    if (s1_R >  STATE_MAX) s1_R =  STATE_MAX;
+    if (s1_R < -STATE_MAX) s1_R = -STATE_MAX;
     s2_R += 2 * v2_R;
-    if (s2_R >  32767) s2_R =  32767;
-    if (s2_R < -32768) s2_R = -32768;
+    if (s2_R >  STATE_MAX) s2_R =  STATE_MAX;
+    if (s2_R < -STATE_MAX) s2_R = -STATE_MAX;
 
-    // Select output based on filter mode and scale back up (+1 bit)
+    // Select output based on filter mode and scale back to int16.
+    // Undo the <<13 input scaling.
     int32_t outL, outR;
     switch (mode) {
         case FilterMode::HPF:
-            outL = hp_L << 1;
-            outR = hp_R << 1;
+            outL = hp_L >> 13;
+            outR = hp_R >> 13;
             break;
         case FilterMode::BPF:
-            outL = bp_L << 1;
-            outR = bp_R << 1;
+            outL = bp_L >> 13;
+            outR = bp_R >> 13;
             break;
         default: // LPF
-            outL = lp_L << 1;
-            outR = lp_R << 1;
+            outL = lp_L >> 13;
+            outR = lp_R >> 13;
             break;
     }
 
