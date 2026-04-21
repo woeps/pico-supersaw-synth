@@ -4,6 +4,7 @@
 #include "hardware/flash.h"
 #include "hardware/sync.h"
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
 
 namespace preset_store {
 
@@ -39,10 +40,12 @@ void save(const Preset& preset) {
     memcpy(page, &preset, sizeof(Preset));
 
     // Disable interrupts — flash is inaccessible during erase/write.
+    multicore_lockout_start_blocking();
     uint32_t ints = save_and_disable_interrupts();
     flash_range_erase(FLASH_PRESET_OFFSET, FLASH_SECTOR_SIZE);
     flash_range_program(FLASH_PRESET_OFFSET, page, FLASH_PAGE_SIZE);
     restore_interrupts(ints);
+    multicore_lockout_end_blocking();
 }
 
 bool load(Preset& preset) {

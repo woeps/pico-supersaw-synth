@@ -17,6 +17,7 @@
 // Must reside in RAM (not flash) because it temporarily disables flash XiP.
 static bool __no_inline_not_in_flash_func(get_bootsel_button)() {
     const uint CS_PIN_INDEX = 1;
+    multicore_lockout_start_blocking();
     uint32_t flags = save_and_disable_interrupts();
     hw_write_masked(&ioqspi_hw->io[CS_PIN_INDEX].ctrl,
                     GPIO_OVERRIDE_LOW << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
@@ -27,6 +28,7 @@ static bool __no_inline_not_in_flash_func(get_bootsel_button)() {
                     GPIO_OVERRIDE_NORMAL << IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_LSB,
                     IO_QSPI_GPIO_QSPI_SS_CTRL_OEOVER_BITS);
     restore_interrupts(flags);
+    multicore_lockout_end_blocking();
     return button_state;
 }
 
@@ -182,9 +184,7 @@ int main() {
                     // Held 5 s → save preset
                     preset_store::Preset p;
                     capturePreset(supersaw, p);
-                    multicore_lockout_start_blocking();
                     preset_store::save(p);
-                    multicore_lockout_end_blocking();
                     printf("Preset saved to flash.\n");
                     btnFlashEndMs = nowMs + FLASH_DURATION_MS;
                     btnState = ButtonState::FLASH_GREEN;
