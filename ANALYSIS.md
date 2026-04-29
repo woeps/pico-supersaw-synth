@@ -2,12 +2,13 @@
 
 ## 1. Bugs (Sorted by Criticality)
 
-**[CRITICAL] Core 1 HardFault via `get_bootsel_button()` disabling Flash XiP**
+**[FIXED] Core 1 HardFault via `get_bootsel_button()` disabling Flash XiP**
 * **Location:** `src/main.cpp`, `src/config/preset_store.cpp`
 * **Issue:** Flash erase/program and BOOTSEL button polling disable the flash Execute-in-Place (XiP) hardware. If Core 1 attempts to fetch an instruction from flash during this window, it hard-faults.
 * **Fix:** Use `multicore_lockout_start_blocking()` and `multicore_lockout_end_blocking()` around these operations to safely pause Core 1.
 
-**[CRITICAL] Inter-Core Race Condition (Deadlock) in Audio Rendering**
+
+**[FIXED] Inter-Core Race Condition (Deadlock) in Audio Rendering**
 * **Location:** `src/synth/supersaw.cpp`, `src/main.cpp`
 * **Issue:** Core 1 resets `core1RenderCmd = 0` after finishing. If Core 0 assigns a new command before Core 1 clears it, the new command is overwritten with 0, causing Core 0 to deadlock waiting for Core 1.
 * **Fix:** Remove `supersaw.core1RenderCmd = 0;` from Core 1. Core 0 should exclusively manage this variable.

@@ -210,7 +210,7 @@ void Supersaw::init() {
 
     // Initialize dual-core rendering synchronization
     core1RenderCmd = 0;
-    core1RenderDone = false;
+    core1RenderDone = true;
 
     dbgClipCount = 0;
     cacheLock = spin_lock_init(spin_lock_claim_unused(true));
@@ -470,9 +470,9 @@ void Supersaw::renderVoiceSample(int startV, int endV,
 
 void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
     // Signal Core 1 to render voices 2–3 into scratch buffer
-    core1RenderDone = false;
-    __dmb(); // Ensure done flag is false before cmd is visible
     core1RenderCmd = numStereoSamples;
+    __dmb(); // Ensure cmd is visible before triggering
+    core1RenderDone = false; // Trigger Core 1
 
     // Core 0: render voices 0–1 into int32_t scratch buffer (no premature clamp)
     for (size_t i = 0; i < numStereoSamples; i++) {

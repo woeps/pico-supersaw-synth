@@ -76,8 +76,7 @@ void core1_entry() {
 
         // Check if Core 0 has requested a voice render
         uint32_t cmd = supersaw.core1RenderCmd;
-        if (cmd != 0) {
-            supersaw.core1RenderCmd = 0; // Clear immediately to avoid overwriting next buffer's command
+        if (cmd != 0 && !supersaw.core1RenderDone) {
             supersaw.renderCore1Voices(cmd);
             __dmb(); // Ensure render data is committed before flag is set
             supersaw.core1RenderDone = true;
