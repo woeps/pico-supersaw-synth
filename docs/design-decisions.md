@@ -167,7 +167,7 @@ Each core has its own `int32_t` scratch buffer (`core0ScratchBuf` and `core1Scra
 
 ## Preset Persistence via Flash
 
-Synth parameters are persisted to the last 4 KB sector of flash so they survive power cycles. The design stores the 12 raw CC values (one `uint8_t` each) plus a 4-byte magic number and 1-byte version for validation — 17 bytes total, written as a 256-byte flash page (minimum programmable unit).
+Synth parameters are persisted to the last 4 KB sector of flash so they survive power cycles. The design stores the 12 raw CC values (one `uint8_t` each) plus a 4-byte magic number and 1-byte version for validation — 17 bytes total, written as a 256-byte flash page (minimum programmable unit). The `Preset` struct uses `__attribute__((packed))` to ensure its size is exactly 17 bytes, preventing uninitialized padding memory from being written to flash.
 
 ### BOOTSEL Button as User Control
 

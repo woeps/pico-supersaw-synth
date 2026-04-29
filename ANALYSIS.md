@@ -33,7 +33,7 @@
 * **Issue:** Interpolation overshoot in `wetL` is cast to `int16_t` without clamping, causing wrap-around glitches and loud spikes.
 * **Fix Applied:** Clamped `wetL` and `wetR` to `[-32768, 32767]` prior to casting.
 
-**[MEDIUM] Uninitialized Struct Padding Written to Flash**
+**[FIXED] Uninitialized Struct Padding Written to Flash**
 * **Location:** `src/config/preset_store.h`
 * **Issue:** `sizeof(Preset)` is 20 bytes due to struct padding, not 17 bytes. Writing this struct to flash copies uninitialized stack memory.
 * **Fix:** Use `__attribute__((packed))` on the `Preset` struct.

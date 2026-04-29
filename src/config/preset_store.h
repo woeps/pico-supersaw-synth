@@ -11,7 +11,7 @@ namespace preset_store {
 
 // Preset data layout stored in flash.
 // Total: 4 (magic) + 1 (version) + 12 (CC values) = 17 bytes, padded to 256.
-struct Preset {
+struct __attribute__((packed)) Preset {
     uint32_t magic;
     uint8_t  version;
     uint8_t  cc[PRESET_CC_COUNT];
