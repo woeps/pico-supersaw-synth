@@ -64,7 +64,7 @@ Voice rendering is split equally across both cores using volatile shared variabl
 
 Core 1 polls this flag alongside MIDI, ensuring sub-microsecond response to render requests. No FIFO or mutex is needed — volatile is sufficient on Cortex-M0+ (no data cache, no out-of-order execution).
 
-The shared `bandCache` (wavetable SRAM cache) is protected by an RP2040 hardware spinlock, since both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering.
+The shared `bandCache` (wavetable SRAM cache) and **voice struct mutations** are protected by the same RP2040 hardware spinlock (`cacheLock`). Both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering. Core 0's `noteOn()` and `noteOff()` also hold this spinlock while mutating voice fields (`note`, `velocity`, `active`, `age`, `env`) to prevent Core 1 from reading a partially-written voice struct.
 
 ## Module Responsibilities
 

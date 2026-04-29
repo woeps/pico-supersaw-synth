@@ -37,11 +37,22 @@ Each voice has an independent ADSR envelope with stages: IDLE → ATTACK → DEC
 
 The envelope level is a `uint32_t` accumulator (full 32-bit range, 0 to `0xFFFF0000`). Per-sample increments are precomputed from CC values using a quadratic time mapping (CC 0 → ~2 ms, CC 127 → ~2 s). The upper 16 bits of the level are used as a multiplier applied to the voice output, keeping the per-sample cost to a single 32×32 integer multiply.
 
+The RELEASE stage includes an explicit `level == 0` guard at its entry: if the envelope is already at zero when RELEASE begins (e.g. sustain CC = 0), it immediately transitions to IDLE rather than waiting for the next `releaseInc` subtraction. Without this guard, a voice could remain `active = true` indefinitely while outputting silence.
+
 This replaces the PoC's simple 5 ms fade ramp.
 
 ## Voice Allocation & Stealing
 
-With 4-voice polyphony, incoming notes are assigned to free voices. If all voices are active, the oldest voice is stolen. Each voice carries a monotonic age counter to determine the steal target. Retriggering an already-playing note restarts the envelope from the current level. Oscillator phases are never reset — they free-run continuously for organic variation between note attacks.
+With 4-voice polyphony, incoming notes are assigned to free voices. If all voices are active, a voice is stolen using the following priority:
+
+1. **Prefer voices in RELEASE stage** — the one with the lowest remaining envelope level is stolen first, minimising the audible click.
+2. **Fall back to oldest ATTACK/DECAY/SUSTAIN voice** — determined by the monotonic age counter.
+
+Previously, only the oldest voice was stolen regardless of envelope stage. This meant stealing an actively-sounding voice when a quieter RELEASE voice was available. The updated steal order also ensures `noteOff` for the stolen note is never silently discarded, because a RELEASE voice is already decaying — it would naturally reach IDLE on its own.
+
+Retriggering an already-playing note restarts the envelope from the current level. Oscillator phases are never reset — they free-run continuously for organic variation between note attacks.
+
+`noteOff()` releases **all** voices holding the given note number (previously only the first match was released). This prevents a voice from hanging when the same note occupies two slots after a steal-and-retrigger sequence.
 
 ## Sample Rate: 44100 Hz
 
@@ -148,7 +159,7 @@ Volatile shared variables coordinate rendering — no FIFO or mutex overhead per
 - **ADSR parameters** are written by Core 0 before render starts and read-only during rendering — no race.
 - **Parameter smoothing** (`currentMix`, `currentDetune`) is updated per-sample by Core 0 only. Core 1 reads these atomically (32-bit loads are atomic on Cortex-M0+). The worst case is a one-sample-stale value — inaudible.
 - **Detune recalculation** is split: Core 0 updates voices 0–1, Core 1 updates voices 2–3, each using the shared `detuneAmount` (atomic `uint8_t` read).
-- **Wavetable SRAM cache** (`bandCache`) is protected by an RP2040 hardware spinlock. Both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering. The spinlock is only contended in this rare case, adding near-zero overhead.
+- **Wavetable SRAM cache** (`bandCache`) and **voice struct mutations** share the same RP2040 hardware spinlock (`cacheLock`). Both cores may call `cacheRelease()` when a voice reaches IDLE during parallel rendering. Core 0's `noteOn()` and `noteOff()` also hold `cacheLock` while writing `note`, `velocity`, `active`, `age`, and `env` fields, preventing Core 1 from reading a partially-written voice struct. `cacheRelease()` acquires the lock internally and is therefore called *before* the lock is re-acquired for voice struct writes to avoid deadlock.
 
 ### Memory Cost
 

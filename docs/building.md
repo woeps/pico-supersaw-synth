@@ -44,6 +44,12 @@ picotool load build/supersaw_midi_synth.uf2
 picotool reboot
 ```
 
+or the picoprobe:
+
+```bash
+openocd -f interface/cmsis-dap.cfg -f target/rp2040.cfg -c "program ./supersaw_midi_synth.elf verify reset exit"
+```
+
 ## Debug Output
 
 USB stdio is enabled (`pico_enable_stdio_usb`). Connect the Pico via USB and open a serial terminal (e.g. `minicom`, `screen`, or PuTTY) on the USB CDC ACM port to see debug messages.

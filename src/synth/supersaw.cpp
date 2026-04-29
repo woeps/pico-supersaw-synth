@@ -115,6 +115,10 @@ uint32_t Envelope::tick(uint32_t attackInc, uint32_t decayInc,
             level = sustainLevel;
             break;
         case EnvStage::RELEASE:
+            if (level == 0) {
+                stage = EnvStage::IDLE;
+                break;
+            }
             if (level > releaseInc) {
                 level -= releaseInc;
             } else {
@@ -269,26 +273,42 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
         }
     }
 
-    // Find a free voice, or steal the oldest
-    int idx = 0;
+    // Find a free voice, or steal: prefer RELEASE voices (lowest level), then oldest
+    int idx = -1;
+    int releaseIdx = -1;
+    int oldestIdx = -1;
+    uint32_t lowestReleaseLevel = UINT32_MAX;
     uint32_t oldestAge = UINT32_MAX;
-    bool found = false;
 
     for (int i = 0; i < MAX_VOICES; i++) {
         if (!voices[i].active) {
             idx = i;
-            found = true;
             break;
+        }
+        if (voices[i].env.stage == EnvStage::RELEASE &&
+            voices[i].env.level < lowestReleaseLevel) {
+            lowestReleaseLevel = voices[i].env.level;
+            releaseIdx = i;
         }
         if (voices[i].age < oldestAge) {
             oldestAge = voices[i].age;
-            idx = i;
+            oldestIdx = i;
+        }
+    }
+    if (idx == -1) {
+        // Prefer stealing a RELEASE voice; fall back to oldest active voice
+        if (releaseIdx != -1) {
+            idx = releaseIdx;
+        } else if (oldestIdx != -1) {
+            idx = oldestIdx;
+        } else {
+            idx = 0; // safety fallback
         }
     }
 
-    (void)found;
-    // Release cache for stolen voice before reset
+    // cacheRelease acquires cacheLock internally.
     cacheRelease(voices[idx].cachedBandIdx);
+
     voices[idx].reset();
     voices[idx].note = note;
     voices[idx].velocity = velocity;
@@ -297,7 +317,7 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
     voices[idx].env.gate(true);
     updateDetuneForVoice(voices[idx]);
 
-    // Acquire SRAM-cached wavetable band for high notes
+    // Acquire SRAM-cached wavetable band for high notes (acquires cacheLock internally).
     if (note >= 72) {
         uint8_t band = noteToOctaveBand[note];
         voices[idx].cachedTable = cacheAcquire(band);
@@ -309,7 +329,6 @@ void Supersaw::noteOff(uint8_t note) {
     for (int i = 0; i < MAX_VOICES; i++) {
         if (voices[i].active && voices[i].note == note) {
             voices[i].env.gate(false);
-            break;
         }
     }
 }
@@ -452,6 +471,7 @@ void Supersaw::renderVoiceSample(int startV, int endV,
 void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
     // Signal Core 1 to render voices 2–3 into scratch buffer
     core1RenderDone = false;
+    __dmb(); // Ensure done flag is false before cmd is visible
     core1RenderCmd = numStereoSamples;
 
     // Core 0: render voices 0–1 into int32_t scratch buffer (no premature clamp)
@@ -483,6 +503,7 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
     while (!core1RenderDone) {
         tight_loop_contents();
     }
+    __dmb(); // Ensure Core 1's scratch buffer writes are visible to Core 0
 
     // Merge both int32_t scratch buffers, normalize, clamp, and apply chorus
     uint32_t localClips = 0;
