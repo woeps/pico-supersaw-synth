@@ -120,6 +120,7 @@ struct Supersaw {
     void init();
     void noteOn(uint8_t note, uint8_t velocity);
     void noteOff(uint8_t note);
+    void panic();
     void setCC(uint8_t cc, uint8_t value);
     void render(int16_t* buffer, size_t numStereoSamples);
 

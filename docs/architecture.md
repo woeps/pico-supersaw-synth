@@ -51,7 +51,7 @@ Bits [14:8]   param1      (note number or CC number)
 Bits [6:0]    param2      (velocity or CC value)
 ```
 
-Core 1 pushes events, core 0 pops and dispatches them. The ring buffer is lock-free and cross-core safe using memory barriers.
+Core 1 pushes events, core 0 pops and dispatches them. The ring buffer is lock-free and cross-core safe using memory barriers. If the queue overflows, Core 1 sets a boolean panic flag. When Core 0 reads this flag, it clears the queue and issues a `PANIC` event which immediately gates off all active voices to prevent hanging notes.
 
 ### Voice Render Synchronization
 

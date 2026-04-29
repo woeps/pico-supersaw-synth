@@ -10,6 +10,7 @@ enum class MidiEventType : uint8_t {
     NOTE_ON  = 0,
     NOTE_OFF = 1,
     CC       = 2,
+    PANIC    = 3,
 };
 
 // MIDI event packed into 32 bits for multicore FIFO.

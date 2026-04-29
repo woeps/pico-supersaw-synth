@@ -13,6 +13,7 @@ static constexpr size_t MIDI_QUEUE_SIZE = 256;
 static volatile uint32_t midiQueue[MIDI_QUEUE_SIZE];
 static volatile uint8_t midiQueueHead = 0; // Written by Core 1 (producer)
 static volatile uint8_t midiQueueTail = 0; // Written by Core 0 (consumer)
+static volatile bool midiOverflowPanic = false; // Set on overflow, read by Core 0
 
 enum class ParserState : uint8_t {
     IDLE,
@@ -37,6 +38,13 @@ bool midiEventAvailable() {
 }
 
 bool midiEventPop(MidiEvent& event) {
+    if (midiOverflowPanic) {
+        midiOverflowPanic = false;
+        event = MidiEvent{MidiEventType::PANIC, 0, 0};
+        midiQueueTail = midiQueueHead; // Clear the queue
+        return true;
+    }
+    
     if (midiQueueHead == midiQueueTail) {
         return false;
     }
@@ -55,6 +63,8 @@ static void pushEvent(const MidiEvent& event) {
         midiQueue[midiQueueHead] = event.pack();
         __dmb(); // Ensure data is written before updating head
         midiQueueHead = nextHead;
+    } else {
+        midiOverflowPanic = true;
     }
 }
 

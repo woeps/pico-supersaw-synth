@@ -146,6 +146,9 @@ int main() {
                 case midi::MidiEventType::CC:
                     supersaw.setCC(event.param1, event.param2);
                     break;
+                case midi::MidiEventType::PANIC:
+                    supersaw.panic();
+                    break;
             }
         }
 

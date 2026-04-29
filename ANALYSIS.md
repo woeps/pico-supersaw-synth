@@ -46,7 +46,7 @@
 * **Location:** `scripts/*.py`
 * **Issue:** Python scripts write C++ files containing Unicode characters without specifying `encoding="utf-8"`, which can crash on Windows (`cp1252`).
 
-**[LOW] Silent Event Dropping on MIDI Queue Overflow**
+**[FIXED] Silent Event Dropping on MIDI Queue Overflow**
 * **Location:** `src/midi/midi_input.cpp`
 * **Issue:** If the MIDI queue overflows, events are silently dropped. Dropping a `NOTE_OFF` event leads to permanently hanging notes.
 * **Fix:** Force `NOTE_OFF` messages into the queue or trigger an "All Notes Off" panic state.

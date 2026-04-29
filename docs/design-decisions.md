@@ -25,7 +25,7 @@ The alternative (raw PIO I2S) would give more control but significantly more cod
 - **Core 0**: Audio rendering (time-critical, blocks on DMA buffer availability)
 - **Core 1**: MIDI polling (latency-sensitive, must not be blocked by audio)
 
-This prevents MIDI input from being starved when audio rendering is busy waiting for buffers. Inter-core communication uses a lock-free, single-producer/single-consumer software ring buffer (256 elements deep) that avoids the overhead of mutexes and prevents the cores from deadlocking if the queue temporarily fills during rendering. Each MIDI event is packed into a single 32-bit word.
+This prevents MIDI input from being starved when audio rendering is busy waiting for buffers. Inter-core communication uses a lock-free, single-producer/single-consumer software ring buffer (256 elements deep) that avoids the overhead of mutexes and prevents the cores from deadlocking if the queue temporarily fills during rendering. If an overflow does occur, a panic flag is set that causes the consumer (Core 0) to reset the queue and silence all voices, avoiding permanently hanging notes. Each MIDI event is packed into a single 32-bit word.
 
 ## 7 Oscillators × 4 Voices
 

@@ -295,6 +295,14 @@ void Supersaw::noteOff(uint8_t note) {
     }
 }
 
+void Supersaw::panic() {
+    for (int i = 0; i < MAX_VOICES; i++) {
+        if (voices[i].active) {
+            voices[i].env.gate(false);
+        }
+    }
+}
+
 void Supersaw::setCC(uint8_t cc, uint8_t value) {
     rawCC[cc] = value;
     if (cc == CC_ATTACK) {
