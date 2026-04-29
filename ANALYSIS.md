@@ -28,10 +28,10 @@
 * **Issue:** `currentMix += (targetMix - currentMix) >> 6;` was getting stuck because positive right-shifts truncated to 0 before reaching the target. E.g. when difference is < 64, shifting right by 6 yields 0. Thus knobs like Mix and Detune could not reach 100%. 
 * **Fix:** Parameter smoothing values (`currentMix`, `targetMix`, `currentDetune`, `targetDetune`) were promoted to Q16.16 format internally in `supersaw.h`. The internal Q16.16 state preserves the fractional differences, preventing the truncation to 0. They are down-shifted to Q8.8 (`currentMix >> 8`) and integer amounts (`currentDetune >> 16`) immediately prior to rendering.
 
-**[HIGH] Allpass Filter Glitch via Truncation Wrap-around**
+**[FIXED] Allpass Filter Glitch via Truncation Wrap-around**
 * **Location:** `src/synth/chorus.cpp`
 * **Issue:** Interpolation overshoot in `wetL` is cast to `int16_t` without clamping, causing wrap-around glitches and loud spikes.
-* **Fix:** Clamp `wetL` and `wetR` to `[-32768, 32767]` prior to casting.
+* **Fix Applied:** Clamped `wetL` and `wetR` to `[-32768, 32767]` prior to casting.
 
 **[MEDIUM] Uninitialized Struct Padding Written to Flash**
 * **Location:** `src/config/preset_store.h`

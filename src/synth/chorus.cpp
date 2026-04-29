@@ -126,6 +126,8 @@ void StereoChorus::process(int16_t& left, int16_t& right) {
     int32_t xL1 = static_cast<int32_t>(delayBufL[readIdxL1]);
     int32_t aL = ((256 - fracL) * 256) / (256 + fracL); // Q8 coefficient
     int32_t wetL = (aL * (xL - apStateL) + (xL1 << 8)) >> 8;
+    if (wetL > 32767) wetL = 32767;
+    if (wetL < -32768) wetL = -32768;
     apStateL = static_cast<int16_t>(wetL);
 
     uint16_t readIdxR0 = (writeIdx - static_cast<uint16_t>(delayR)) & CHORUS_BUF_MASK;
@@ -134,6 +136,8 @@ void StereoChorus::process(int16_t& left, int16_t& right) {
     int32_t xR1 = static_cast<int32_t>(delayBufR[readIdxR1]);
     int32_t aR = ((256 - fracR) * 256) / (256 + fracR); // Q8 coefficient
     int32_t wetR = (aR * (xR - apStateR) + (xR1 << 8)) >> 8;
+    if (wetR > 32767) wetR = 32767;
+    if (wetR < -32768) wetR = -32768;
     apStateR = static_cast<int16_t>(wetR);
 
     // Crossfade wet/dry mix: total gain never exceeds unity.
