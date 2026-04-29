@@ -83,11 +83,23 @@ def compute_note_to_band() -> list[int]:
 
 
 def generate_wavetable_file(output_path: str):
-    """Generate the saw_wavetable.cpp file with band-limited wavetable data."""
+    """Generate the saw_wavetable.cpp file with band-limited wavetable data and phase increments."""
     lines: list[str] = []
     lines.append('#include "synth/saw_wavetable.h"')
     lines.append("")
     lines.append("namespace synth {")
+    lines.append("")
+
+    # Generate phase increments
+    lines.append("// Precomputed phase increments for MIDI notes 0–127.")
+    lines.append("// phase_inc = freq / SAMPLE_RATE * 2^32")
+    lines.append("// freq = 440 * 2^((note - 69) / 12)")
+    lines.append("const uint32_t midiNotePhaseInc[128] = {")
+    phase_incs = [compute_phase_inc(note) for note in range(128)]
+    for i in range(0, 128, 4):
+        vals = phase_incs[i : i + 4]
+        lines.append("    " + ", ".join(f"{v:10d}" for v in vals) + ",")
+    lines.append("};")
     lines.append("")
 
     # Generate wavetables
@@ -129,30 +141,6 @@ def generate_wavetable_file(output_path: str):
 
 
 def main():
-    print("// Precomputed phase increments for MIDI notes 0–127.")
-    print("// phase_inc = freq / SAMPLE_RATE * 2^32")
-    print("// freq = 440 * 2^((note - 69) / 12)")
-    print("const uint32_t midiNotePhaseInc[128] = {")
-
-    phase_incs = [compute_phase_inc(note) for note in range(128)]
-    for i in range(0, 128, 4):
-        vals = phase_incs[i : i + 4]
-        print("    " + ", ".join(str(v) for v in vals) + ",")
-
-    print("};")
-    print()
-
-    print("// Detune multipliers in Q16.16 fixed-point.")
-    print("// Oscillator order: [-3/3, -2/3, -1/3, 0, +1/3, +2/3, +3/3] * 0.3 semitones")
-    print("// multiplier = 2^(offset * 0.3 / 12), stored as (multiplier * 65536)")
-    print(f"const uint32_t detuneMultiplier[{NUM_OSCILLATORS}] = {{")
-
-    detune_mults = [compute_detune_multiplier(i) for i in range(NUM_OSCILLATORS)]
-    print("    " + ", ".join(str(v) for v in detune_mults) + ",")
-
-    print("};")
-    print()
-
     # Generate band-limited wavetable file
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)

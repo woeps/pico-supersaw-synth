@@ -38,7 +38,7 @@
 * **Issue:** `sizeof(Preset)` is 20 bytes due to struct padding, not 17 bytes. Writing this struct to flash copies uninitialized stack memory.
 * **Fix:** Use `__attribute__((packed))` on the `Preset` struct.
 
-**[MEDIUM] Incomplete Code Generation in `generate_tables.py`**
+**[FIXED] Incomplete Code Generation in `generate_tables.py`**
 * **Location:** `scripts/generate_tables.py`
 * **Issue:** The script only prints `midiNotePhaseInc` and `detuneMultiplier` arrays to stdout instead of persisting them to a `.cpp` or `.h` file.
 
