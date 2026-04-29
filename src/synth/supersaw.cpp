@@ -193,8 +193,8 @@ void Supersaw::init() {
     rawCC[CC_FILTER_MODE]   = 0;
 
     // Initialize parameter smoothing
-    targetMix = currentMix = 256;  // Q8.8: 256 = full side gain
-    targetDetune = currentDetune = static_cast<int32_t>(detuneAmount) << 8;
+    targetMix = currentMix = 65536;  // Q16.16: 65536 = full side gain (256 in Q8.8)
+    targetDetune = currentDetune = static_cast<int32_t>(detuneAmount) << 16;
     detuneSmoothCounter = 0;
 
     recalcSpread();
@@ -344,12 +344,12 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
     } else if (cc == CC_RELEASE) {
         releaseInc = ccToEnvInc(value);
     } else if (cc == CC_DETUNE) {
-        targetDetune = static_cast<int32_t>(detuneCurve[value]) << 8;
+        targetDetune = static_cast<int32_t>(detuneCurve[value]) << 16;
     } else if (cc == CC_SPREAD) {
         spread = value;
         recalcSpread();
     } else if (cc == CC_MIX) {
-        targetMix = (static_cast<int32_t>(value) * 256) / 127;
+        targetMix = ((static_cast<int32_t>(value) * 256) / 127) << 8;
     } else if (cc == CC_CHORUS_DEPTH) {
         chorus.setDepth(value);
     } else if (cc == CC_CHORUS_RATE) {
@@ -487,13 +487,13 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         // (Core 0 updates voices 0–1 only; Core 1 updates voices 2–3)
         if (++detuneSmoothCounter >= 32) {
             detuneSmoothCounter = 0;
-            detuneAmount = static_cast<uint8_t>(currentDetune >> 8);
+            detuneAmount = static_cast<uint8_t>(currentDetune >> 16);
             for (int v = 0; v < 2; v++) {
                 if (voices[v].active) updateDetuneForVoice(voices[v]);
             }
         }
 
-        renderVoiceSample(0, 2, sampleL, sampleR, currentMix);
+        renderVoiceSample(0, 2, sampleL, sampleR, currentMix >> 8);
 
         core0ScratchBuf[i * 2]     = sampleL;
         core0ScratchBuf[i * 2 + 1] = sampleR;
@@ -570,7 +570,7 @@ void Supersaw::renderCore1Voices(size_t numStereoSamples) {
             }
         }
 
-        renderVoiceSample(2, MAX_VOICES, sampleL, sampleR, currentMix);
+        renderVoiceSample(2, MAX_VOICES, sampleL, sampleR, currentMix >> 8);
 
         core1ScratchBuf[i * 2]     = sampleL;
         core1ScratchBuf[i * 2 + 1] = sampleR;

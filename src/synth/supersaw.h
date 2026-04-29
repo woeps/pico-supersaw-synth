@@ -74,10 +74,10 @@ struct Supersaw {
     uint8_t mixAmount;     // 0–127 (CC value), 0 = center only, 127 = full supersaw
 
     // Parameter smoothing (one-pole slew to prevent zipper noise)
-    int32_t currentMix;        // smoothed side gain, Q8.8 (0–256)
-    int32_t targetMix;         // target side gain, Q8.8
-    int32_t currentDetune;     // smoothed detune amount, Q8.8
-    int32_t targetDetune;      // target detune amount, Q8.8
+    int32_t currentMix;        // smoothed side gain, Q16.16
+    int32_t targetMix;         // target side gain, Q16.16
+    int32_t currentDetune;     // smoothed detune amount, Q16.16
+    int32_t targetDetune;      // target detune amount, Q16.16
     uint8_t detuneSmoothCounter; // sample counter for periodic detune recalc
 
     // Per-oscillator stereo pan gains, derived from spread.

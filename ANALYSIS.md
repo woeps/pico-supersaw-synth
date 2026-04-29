@@ -23,10 +23,10 @@
 * **Issue:** Data is copied directly from flash into the caller's `Preset` object before validation. If validation fails, the caller is left with garbage data.
 * **Fix:** Read into a temporary buffer and only copy to the output upon successful validation.
 
-**[HIGH] Fixed-Point Parameter Smoothing Asymmetry (Gets Stuck)**
+**[RESOLVED] Fixed-Point Parameter Smoothing Asymmetry (Gets Stuck)**
 * **Location:** `src/synth/supersaw.cpp`
-* **Issue:** `currentMix += (targetMix - currentMix) >> 6;` gets stuck because right-shifting a negative integer rounds toward negative infinity. Knobs like Mix and Detune cannot reach 100%.
-* **Fix:** Store values in a higher precision format (e.g., Q16.16) internally.
+* **Issue:** `currentMix += (targetMix - currentMix) >> 6;` was getting stuck because positive right-shifts truncated to 0 before reaching the target. E.g. when difference is < 64, shifting right by 6 yields 0. Thus knobs like Mix and Detune could not reach 100%. 
+* **Fix:** Parameter smoothing values (`currentMix`, `targetMix`, `currentDetune`, `targetDetune`) were promoted to Q16.16 format internally in `supersaw.h`. The internal Q16.16 state preserves the fractional differences, preventing the truncation to 0. They are down-shifted to Q8.8 (`currentMix >> 8`) and integer amounts (`currentDetune >> 16`) immediately prior to rendering.
 
 **[HIGH] Allpass Filter Glitch via Truncation Wrap-around**
 * **Location:** `src/synth/chorus.cpp`
