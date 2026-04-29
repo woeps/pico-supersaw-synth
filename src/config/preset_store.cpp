@@ -49,19 +49,23 @@ void save(const Preset& preset) {
 }
 
 bool load(Preset& preset) {
-    // Read directly from XiP-mapped flash.
-    memcpy(&preset, FLASH_PRESET_ADDR, sizeof(Preset));
+    Preset tempPreset;
 
-    if (preset.magic != PRESET_MAGIC || preset.version != PRESET_VERSION) {
+    // Read directly from XiP-mapped flash.
+    memcpy(&tempPreset, FLASH_PRESET_ADDR, sizeof(Preset));
+
+    if (tempPreset.magic != PRESET_MAGIC || tempPreset.version != PRESET_VERSION) {
         return false;
     }
 
     // Sanity-check: all CC values must be 0–127.
     for (int i = 0; i < PRESET_CC_COUNT; i++) {
-        if (preset.cc[i] > 127) {
+        if (tempPreset.cc[i] > 127) {
             return false;
         }
     }
+
+    preset = tempPreset;
     return true;
 }
 

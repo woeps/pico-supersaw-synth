@@ -13,12 +13,12 @@
 * **Issue:** Core 1 resets `core1RenderCmd = 0` after finishing. If Core 0 assigns a new command before Core 1 clears it, the new command is overwritten with 0, causing Core 0 to deadlock waiting for Core 1.
 * **Fix:** Remove `supersaw.core1RenderCmd = 0;` from Core 1. Core 0 should exclusively manage this variable.
 
-**[CRITICAL] Missing Memory Barrier for IPC Audio Buffers**
+**[FIXED] Missing Memory Barrier for IPC Audio Buffers**
 * **Location:** `src/main.cpp`
 * **Issue:** Core 1 writes audio samples to `core1ScratchBuf` and flags `core1RenderDone = true`. Without a memory barrier, Core 0 might see the flag before the memory writes are committed.
 * **Fix:** Add `__dmb()` or `__compiler_memory_barrier()` before setting the done flag.
 
-**[HIGH] `load()` Mutates Output Parameter on Failure**
+**[FIXED] `load()` Mutates Output Parameter on Failure**
 * **Location:** `src/config/preset_store.cpp`
 * **Issue:** Data is copied directly from flash into the caller's `Preset` object before validation. If validation fails, the caller is left with garbage data.
 * **Fix:** Read into a temporary buffer and only copy to the output upon successful validation.
