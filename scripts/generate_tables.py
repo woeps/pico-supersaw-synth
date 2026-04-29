@@ -135,7 +135,7 @@ def generate_wavetable_file(output_path: str):
     lines.append("} // namespace synth")
     lines.append("")
 
-    with open(output_path, "w") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"Wrote {output_path}")
 

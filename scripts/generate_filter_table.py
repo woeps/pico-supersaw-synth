@@ -90,7 +90,7 @@ def patch_filter_cpp(table: list[int]):
     project_root = os.path.dirname(script_dir)
     filter_cpp = os.path.join(project_root, "src", "synth", "filter.cpp")
 
-    with open(filter_cpp, "r") as f:
+    with open(filter_cpp, "r", encoding="utf-8") as f:
         content = f.read()
 
     # Build replacement block
@@ -121,7 +121,7 @@ def patch_filter_cpp(table: list[int]):
         print("ERROR: Could not find filterCutoffTable in", filter_cpp)
         return
 
-    with open(filter_cpp, "w") as f:
+    with open(filter_cpp, "w", encoding="utf-8") as f:
         f.write(new_content)
     print(f"Patched {filter_cpp} ({count} replacement(s))")
 

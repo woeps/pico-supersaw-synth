@@ -70,7 +70,7 @@ def write_header(table: list[int]):
         "#endif // VELOCITY_TABLE_H\n"
     )
 
-    with open(header_path, "w") as f:
+    with open(header_path, "w", encoding="utf-8") as f:
         f.write(content)
     print(f"Wrote {header_path}")
 

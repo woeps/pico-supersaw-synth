@@ -42,7 +42,7 @@
 * **Location:** `scripts/generate_tables.py`
 * **Issue:** The script only prints `midiNotePhaseInc` and `detuneMultiplier` arrays to stdout instead of persisting them to a `.cpp` or `.h` file.
 
-**[MEDIUM] Missing UTF-8 Encoding during File Writes**
+**[FIXED] Missing UTF-8 Encoding during File Writes**
 * **Location:** `scripts/*.py`
 * **Issue:** Python scripts write C++ files containing Unicode characters without specifying `encoding="utf-8"`, which can crash on Windows (`cp1252`).
 
