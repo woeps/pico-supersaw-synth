@@ -159,6 +159,10 @@ void Supersaw::init() {
     targetDetune = currentDetune = static_cast<int32_t>(detuneAmount) << 16;
     detuneSmoothCounter = 0;
 
+    // Initialize Core 1 snapshot fields
+    core1SideGain = currentMix >> 8;
+    core1DetuneAmount = detuneAmount;
+
     recalcSpread();
 
     // Initialize wavetable SRAM band cache
@@ -230,7 +234,7 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
             voices[i].age = nextAge++;
             voices[i].velocity = velocity;
             voices[i].env.gate(true);
-            updateDetuneForVoice(voices[i]);
+            updateDetuneForVoice(voices[i], detuneAmount);
             return;
         }
     }
@@ -277,7 +281,7 @@ void Supersaw::noteOn(uint8_t note, uint8_t velocity) {
     voices[idx].active = true;
     voices[idx].age = nextAge++;
     voices[idx].env.gate(true);
-    updateDetuneForVoice(voices[idx]);
+    updateDetuneForVoice(voices[idx], detuneAmount);
 
     // Acquire SRAM-cached wavetable band for high notes (acquires cacheLock internally).
     if (note >= 72) {
@@ -304,6 +308,7 @@ void Supersaw::panic() {
 }
 
 void Supersaw::setCC(uint8_t cc, uint8_t value) {
+    if (cc >= 128) return;
     rawCC[cc] = value;
     if (cc == CC_ATTACK) {
         attackInc = ccToEnvInc(value);
@@ -319,6 +324,7 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
         spread = value;
         recalcSpread();
     } else if (cc == CC_MIX) {
+        mixAmount = value;
         targetMix = ((static_cast<int32_t>(value) * 256) / 127) << 8;
     } else if (cc == CC_CHORUS_DEPTH) {
         chorus.setDepth(value);
@@ -333,7 +339,7 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
     }
 }
 
-void Supersaw::updateDetuneForVoice(Voice& v) {
+void Supersaw::updateDetuneForVoice(Voice& v, uint8_t detuneAmount) {
     uint32_t baseInc = midiNotePhaseInc[v.note];
     for (int i = 0; i < NUM_OSCILLATORS; i++) {
         // Interpolate between unity (65536) and max-detune multiplier
@@ -439,6 +445,11 @@ void Supersaw::renderVoiceSample(int startV, int endV,
 }
 
 void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
+    // Snapshot the smoothed parameters for Core 1 to avoid data races.
+    // Core 1 will read these frozen values instead of the live currentMix/currentDetune.
+    core1SideGain = currentMix >> 8;
+    core1DetuneAmount = static_cast<uint8_t>(currentDetune >> 16);
+
     // Signal Core 1 to render voices 2–3 into scratch buffer
     core1RenderCmd = numStereoSamples;
     __dmb(); // Ensure cmd is visible before triggering
@@ -459,7 +470,7 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
             detuneSmoothCounter = 0;
             detuneAmount = static_cast<uint8_t>(currentDetune >> 16);
             for (int v = 0; v < 2; v++) {
-                if (voices[v].active) updateDetuneForVoice(voices[v]);
+                if (voices[v].active) updateDetuneForVoice(voices[v], detuneAmount);
             }
         }
 
@@ -526,6 +537,8 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
 }
 
 void Supersaw::renderCore1Voices(size_t numStereoSamples) {
+    __dmb(); // Ensure Core 0's snapshot writes are visible before we read them
+
     uint8_t localDetuneCounter = 0;
 
     for (size_t i = 0; i < numStereoSamples; i++) {
@@ -536,11 +549,11 @@ void Supersaw::renderCore1Voices(size_t numStereoSamples) {
         if (++localDetuneCounter >= 32) {
             localDetuneCounter = 0;
             for (int v = 2; v < MAX_VOICES; v++) {
-                if (voices[v].active) updateDetuneForVoice(voices[v]);
+                if (voices[v].active) updateDetuneForVoice(voices[v], core1DetuneAmount);
             }
         }
 
-        renderVoiceSample(2, MAX_VOICES, sampleL, sampleR, currentMix >> 8);
+        renderVoiceSample(2, MAX_VOICES, sampleL, sampleR, core1SideGain);
 
         core1ScratchBuf[i * 2]     = sampleL;
         core1ScratchBuf[i * 2 + 1] = sampleR;
@@ -548,6 +561,7 @@ void Supersaw::renderCore1Voices(size_t numStereoSamples) {
 }
 
 uint8_t Supersaw::getCC(uint8_t cc) const {
+    if (cc >= 128) return 0;
     return rawCC[cc];
 }
 

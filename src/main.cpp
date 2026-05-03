@@ -152,6 +152,11 @@ int main() {
             }
         }
 
+        // Memory barrier: ensures all voice/parameter writes are visible to Core 1.
+        // Core 1 is guaranteed idle at this point because render() waits for
+        // core1RenderDone before returning, so there's no concurrent access.
+        __dmb();
+
         // ── BOOTSEL button state machine ──────────────────────────────
         uint32_t nowMs = to_ms_since_boot(get_absolute_time());
         bool btnPressed = get_bootsel_button();

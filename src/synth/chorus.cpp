@@ -72,8 +72,9 @@ void StereoChorus::setRate(uint8_t value) {
     // freq = 0.1 + (value / 127.0) * 2.9
     // At value=0:   freq=0.1 Hz → lfoInc = 9737
     // At value=127: freq=3.0 Hz → lfoInc = 292119
-    // Linear interpolation: lfoInc = 9737 + (value * (292119 - 9737)) / 127
-    lfoInc = 9737 + (static_cast<uint32_t>(value) * 2223u) ;
+    // Simplified from: 9737 + (value * (292119 - 9737)) / 127
+    // The per-step increment (292119 - 9737) / 127 ≈ 2222.7, rounded to 2223.
+    lfoInc = 9737 + (static_cast<uint32_t>(value) * 2223u);
 }
 
 void StereoChorus::process(int16_t& left, int16_t& right) {

@@ -80,6 +80,12 @@ struct Supersaw {
     int32_t targetDetune;      // target detune amount, Q16.16
     uint8_t detuneSmoothCounter; // sample counter for periodic detune recalc
 
+    // Snapshot fields for Core 1 (written by Core 0, read by Core 1).
+    // Core 0 writes these before signaling Core 1; Core 1 reads them
+    // after its barrier. This avoids data races on the live smoothed values.
+    int32_t core1SideGain;         // Q8.8 side gain snapshot for Core 1
+    uint8_t core1DetuneAmount;     // detune amount snapshot for Core 1
+
     // Per-oscillator stereo pan gains, derived from spread.
     // Q8.8 fixed-point: 256 = unity.
     uint16_t panL[NUM_OSCILLATORS];
@@ -133,7 +139,7 @@ struct Supersaw {
     uint8_t getCC(uint8_t cc) const;
 
 private:
-    void updateDetuneForVoice(Voice& v);
+    void updateDetuneForVoice(Voice& v, uint8_t detuneAmount);
     void recalcSpread();
     static uint32_t ccToEnvInc(uint8_t cc);
     const int16_t* cacheAcquire(uint8_t bandIdx);

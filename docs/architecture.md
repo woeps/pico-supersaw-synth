@@ -24,12 +24,14 @@ MIDI IN (UART1 RX) → MIDI Parser → Software Ring Buffer → Voice Allocator
 - Runs the main loop:
   1. Drains pending MIDI events from the software ring buffer
   2. Dispatches note on/off to the voice allocator and CC messages to parameter update
-  3. Takes an audio buffer from the I2S pool (blocks until available)
-  4. Signals Core 1 to render voices 2–3 via a shared volatile flag
-  5. Renders voices 0–1 into an int32_t scratch buffer (with per-sample parameter smoothing)
-  6. Waits for Core 1 to finish
-  7. Merges both int32_t scratch buffers, applies ÷2 normalization, clamp, filter, and stereo chorus
-  8. Submits the buffer for DMA playback
+  3. Memory barrier (`__dmb()`) — ensures all voice/parameter writes are visible to Core 1 before render
+  4. Takes an audio buffer from the I2S pool (blocks until available)
+  5. Snapshots smoothed parameters (`core1SideGain`, `core1DetuneAmount`) for Core 1
+  6. Signals Core 1 to render voices 2–3 via a shared volatile flag
+  7. Renders voices 0–1 into an int32_t scratch buffer (with per-sample parameter smoothing)
+  8. Waits for Core 1 to finish
+  9. Merges both int32_t scratch buffers, applies ÷2 normalization, clamp, filter, and stereo chorus
+  10. Submits the buffer for DMA playback
 
 ### Core 1 — MIDI Input & Voices 2–3
 - Initializes UART1 for MIDI reception
@@ -61,8 +63,12 @@ Voice rendering is split equally across both cores using volatile shared variabl
 - `core1RenderDone` — Core 1 sets this flag when its voices are rendered
 - `core0ScratchBuf` — int32_t buffer where Core 0 writes its partial stereo mix
 - `core1ScratchBuf` — int32_t buffer where Core 1 writes its partial stereo mix
+- `core1SideGain` — Snapshot of smoothed side gain written by Core 0 before signaling
+- `core1DetuneAmount` — Snapshot of smoothed detune written by Core 0 before signaling
 
 Core 1 polls this flag alongside MIDI, ensuring sub-microsecond response to render requests. No FIFO or mutex is needed — volatile is sufficient on Cortex-M0+ (no data cache, no out-of-order execution).
+
+**Snapshot Protocol**: Core 0 snapshots the smoothed parameters (`currentMix`, `currentDetune`) into dedicated fields before signaling Core 1. Core 1 reads these frozen values via its own `__dmb()` barrier instead of the live values that Core 0 continues to smooth during its own render. This prevents data races on the per-sample smoothed parameters.
 
 The shared `bandCache` (wavetable SRAM cache) and **voice struct mutations** are protected by the same RP2040 hardware spinlock (`cacheLock`). Both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering. Core 0's `noteOn()` and `noteOff()` also hold this spinlock while mutating voice fields (`note`, `velocity`, `active`, `age`, `env`) to prevent Core 1 from reading a partially-written voice struct.
 

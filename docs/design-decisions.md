@@ -70,6 +70,8 @@ The `detune` parameter (CC 94) is mapped through a non-linear piecewise curve (1
 
 All CC number assignments are centralized in `src/config/midi_cc.h` as `#define` constants. This makes remapping parameters a single-file change with no logic edits required.
 
+`setCC()` and `getCC()` guard against CC numbers ≥ 128 (the `rawCC[]` array is 128 entries). MIDI data bytes are 7-bit so valid CCs cannot exceed 127, but the guard prevents undefined behavior if the functions are ever called with unsanitized input.
+
 | CC | Parameter | Range |
 |----|-----------|-------|
 | 73 | Attack | 0–127 → ~2 ms – 2 s |
