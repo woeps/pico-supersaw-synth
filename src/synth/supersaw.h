@@ -103,10 +103,8 @@ struct Supersaw {
     int32_t core1ScratchBuf[AUDIO_BUFFER_SAMPLES * 2];
 
     // Inter-core synchronization (volatile for cross-core visibility).
-    // core1RenderCmd: Number of stereo samples to render (Managed exclusively by Core 0).
-    // core1RenderDone: False = start render, True = render complete.
+    // core1RenderCmd: 0 = idle/done, non-zero = number of stereo samples to render.
     volatile uint32_t core1RenderCmd;
-    volatile bool core1RenderDone;
 
     // Debug: lightweight clip counter (only Core 0 reads/writes).
     uint32_t dbgClipCount;

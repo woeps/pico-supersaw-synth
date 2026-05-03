@@ -177,7 +177,7 @@ The Tiny2040's BOOTSEL button is repurposed as a save/restore trigger. It is not
 
 ### Button State Machine
 
-A hold-duration state machine runs in the main loop (polled once per audio buffer cycle):
+A hold-duration state machine runs in the main loop, polled every 100 ms to avoid stalling Core 1's MIDI parsing and voice rendering:
 
 - **< 3 s release** → restore saved preset (blue LED flash)
 - **≥ 3 s hold** → red LED blink indicates save mode is armed
@@ -187,4 +187,6 @@ On boot, `preset_store::load()` checks the flash sector for a valid magic/versio
 
 ### Flash Write Safety
 
-Flash erase/program requires that no code executes from flash on either core. Core 1 registers as a lockout victim via `multicore_lockout_victim_init()` at startup. Before writing, Core 0 calls `multicore_lockout_start_blocking()` which triggers an NMI on Core 1, parking it in a RAM-resident spin loop. After the write completes, `multicore_lockout_end_blocking()` releases Core 1. The total audio dropout is ~5–10 ms — acceptable for an explicit user-initiated save.
+Flash erase/program requires that no code executes from flash on either core. Core 1 registers as a lockout victim via `multicore_lockout_victim_init()` at startup. Before writing, Core 0 calls `multicore_lockout_start_blocking()` which triggers an NMI on Core 1, parking it in a RAM-resident spin loop. After the write completes, `multicore_lockout_end_blocking()` releases Core 1.
+
+To prevent audible underrun during the flash erase (~50 ms), all available audio buffers are pre-filled with silence before the save operation begins. This provides ~52 ms of buffered audio to play through the flash operation.

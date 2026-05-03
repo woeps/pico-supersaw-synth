@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <cstring>
 #include "pico/stdlib.h"
 #include "pico/multicore.h"
 #include "pico/audio_i2s.h"
@@ -44,6 +45,8 @@ enum class ButtonState : uint8_t {
 static ButtonState  btnState       = ButtonState::IDLE;
 static uint32_t     btnPressTimeMs = 0;
 static uint32_t     btnFlashEndMs  = 0;
+static uint32_t     lastBootselPollMs = 0;
+static bool         cachedBootselState = false;
 static constexpr uint32_t HOLD_THRESHOLD_MS = 3000;
 static constexpr uint32_t SAVE_THRESHOLD_MS = 5000;
 static constexpr uint32_t FLASH_DURATION_MS = 500;
@@ -66,6 +69,20 @@ static void capturePreset(const synth::Supersaw& ss, preset_store::Preset& p) {
 }
 
 static synth::Supersaw supersaw;
+static struct audio_buffer_pool* audioPool = nullptr;
+
+// Pre-fill audio buffers with silence to cover flash erase/program duration (~50 ms).
+// This prevents I2S DMA underrun during the preset save operation.
+static void prefillSilenceForFlash() {
+    for (int i = 0; i < AUDIO_BUFFER_COUNT; i++) {
+        struct audio_buffer* buf = take_audio_buffer(audioPool, false);
+        if (buf) {
+            memset(buf->buffer->bytes, 0, buf->max_sample_count * 4);
+            buf->sample_count = buf->max_sample_count;
+            give_audio_buffer(audioPool, buf);
+        }
+    }
+}
 
 void core1_entry() {
     multicore_lockout_victim_init();
@@ -76,10 +93,10 @@ void core1_entry() {
 
         // Check if Core 0 has requested a voice render
         uint32_t cmd = supersaw.core1RenderCmd;
-        if (cmd != 0 && !supersaw.core1RenderDone) {
+        if (cmd != 0) {
             supersaw.renderCore1Voices(cmd);
-            __dmb(); // Ensure render data is committed before flag is set
-            supersaw.core1RenderDone = true;
+            __dmb(); // Ensure render data is committed before signaling done
+            supersaw.core1RenderCmd = 0; // Signal completion (0 = idle)
         }
     }
 }
@@ -130,7 +147,7 @@ int main() {
 
     audio::audioInit();
 
-    struct audio_buffer_pool* pool = audio::getAudioBufferPool();
+    audioPool = audio::getAudioBufferPool();
 
     while (true) {
         // Process all pending MIDI events from core 1
@@ -159,7 +176,11 @@ int main() {
 
         // ── BOOTSEL button state machine ──────────────────────────────
         uint32_t nowMs = to_ms_since_boot(get_absolute_time());
-        bool btnPressed = get_bootsel_button();
+        if (nowMs - lastBootselPollMs >= 100) {
+            cachedBootselState = get_bootsel_button();
+            lastBootselPollMs = nowMs;
+        }
+        bool btnPressed = cachedBootselState;
 
         switch (btnState) {
             case ButtonState::IDLE:
@@ -190,6 +211,8 @@ int main() {
                     btnState = ButtonState::IDLE;
                 } else if (nowMs - btnPressTimeMs >= SAVE_THRESHOLD_MS) {
                     // Held 5 s → save preset
+                    // Pre-fill audio buffers with silence to cover flash erase (~50 ms)
+                    prefillSilenceForFlash();
                     preset_store::Preset p;
                     capturePreset(supersaw, p);
                     preset_store::save(p);
@@ -241,7 +264,7 @@ int main() {
         }
 
         // Get an audio buffer from the pool (blocks until available)
-        struct audio_buffer* buffer = take_audio_buffer(pool, true);
+        struct audio_buffer* buffer = take_audio_buffer(audioPool, true);
         if (buffer) {
             int16_t* samples = (int16_t*)buffer->buffer->bytes;
             uint32_t numStereoSamples = buffer->max_sample_count;
@@ -249,7 +272,7 @@ int main() {
             supersaw.render(samples, numStereoSamples);
 
             buffer->sample_count = numStereoSamples;
-            give_audio_buffer(pool, buffer);
+            give_audio_buffer(audioPool, buffer);
         }
 
         // Debug: use red LED to indicate digital clipping at the merge stage.

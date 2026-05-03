@@ -59,14 +59,13 @@ Core 1 pushes events, core 0 pops and dispatches them. The ring buffer is lock-f
 
 Voice rendering is split equally across both cores using volatile shared variables:
 
-- `core1RenderCmd` — Core 0 writes the buffer sample count to trigger Core 1 rendering
-- `core1RenderDone` — Core 1 sets this flag when its voices are rendered
+- `core1RenderCmd` — Core 0 writes the buffer sample count to trigger Core 1 rendering; Core 1 writes 0 to signal completion (0 = idle/done, non-zero = render)
 - `core0ScratchBuf` — int32_t buffer where Core 0 writes its partial stereo mix
 - `core1ScratchBuf` — int32_t buffer where Core 1 writes its partial stereo mix
 - `core1SideGain` — Snapshot of smoothed side gain written by Core 0 before signaling
 - `core1DetuneAmount` — Snapshot of smoothed detune written by Core 0 before signaling
 
-Core 1 polls this flag alongside MIDI, ensuring sub-microsecond response to render requests. No FIFO or mutex is needed — volatile is sufficient on Cortex-M0+ (no data cache, no out-of-order execution).
+Core 1 polls `core1RenderCmd != 0` alongside MIDI, ensuring sub-microsecond response to render requests. No FIFO or mutex is needed — volatile is sufficient on Cortex-M0+ (no data cache, no out-of-order execution).
 
 **Snapshot Protocol**: Core 0 snapshots the smoothed parameters (`currentMix`, `currentDetune`) into dedicated fields before signaling Core 1. Core 1 reads these frozen values via its own `__dmb()` barrier instead of the live values that Core 0 continues to smooth during its own render. This prevents data races on the per-sample smoothed parameters.
 
@@ -99,4 +98,4 @@ The BOOTSEL button on the Tiny2040 doubles as a user-facing preset control:
 
 All 12 CC-controllable parameters are persisted as raw `uint8_t` values in a 256-byte flash page at the last 4 KB sector. The `preset_store` module handles flash erase/program, while `main.cpp` manages the button state machine and LED feedback.
 
-Flash writes require pausing Core 1 via `multicore_lockout_start_blocking()` because the RP2040 executes code from flash (XiP). Core 1 calls `multicore_lockout_victim_init()` at startup to enable safe lockout. The brief audio dropout during save (~few ms) is acceptable for a user-initiated action.
+Flash writes require pausing Core 1 via `multicore_lockout_start_blocking()` because the RP2040 executes code from flash (XiP). Core 1 calls `multicore_lockout_victim_init()` at startup to enable safe lockout. Before saving, all available audio buffers are pre-filled with silence (~52 ms of audio) to prevent I2S DMA underrun during the flash erase/program cycle (~50 ms).
