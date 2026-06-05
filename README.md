@@ -1,5 +1,7 @@
 # SUPERSAW-MIDI-SYNTH
 
+[![Build Firmware](https://github.com/woeps/pico-supersaw-synth/actions/workflows/build-firmware.yml/badge.svg)](https://github.com/woeps/pico-supersaw-synth/actions/workflows/build-firmware.yml)
+
 Simple midi controlled supersaw synthesizer.
 
 ## Hardware
