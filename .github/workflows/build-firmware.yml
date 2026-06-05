@@ -12,7 +12,6 @@ on:
       - 'CMakeLists.txt'
       - 'pico_sdk_import.cmake'
       - 'pico_extras_import.cmake'
-      - '.github/workflows/**'
 
 permissions:
   contents: write
