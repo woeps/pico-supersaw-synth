@@ -151,6 +151,7 @@ All CC numbers are defined in `src/config/midi_cc.h`:
 | 74 | `CC_FILTER_CUTOFF` | Filter cutoff |
 | 75 | `CC_DECAY` | Envelope decay |
 | 79 | `CC_SUSTAIN` | Envelope sustain |
+| 85 | `CC_PITCHBEND_RANGE` | Pitch-bend range (0–24 semitones) |
 | 91 | `CC_CHORUS_DEPTH` | Chorus depth |
 | 92 | `CC_CHORUS_RATE` | Chorus rate |
 | 93 | `CC_SPREAD` | Stereo spread |

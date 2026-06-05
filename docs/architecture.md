@@ -49,9 +49,9 @@ MIDI events use a lock-free, single-producer, single-consumer software ring buff
 
 ```
 Bits [23:20]  channel     (MIDI channel 0–15, preserved for future use)
-Bits [17:16]  event type  (NOTE_ON / NOTE_OFF / CC / PANIC)
-Bits [14:8]   param1      (note number or CC number)
-Bits [6:0]    param2      (velocity or CC value)
+Bits [18:16]  event type  (NOTE_ON / NOTE_OFF / CC / PANIC / PITCH_BEND)
+Bits [14:8]   param1      (note/CC number, or pitch-bend LSB)
+Bits [6:0]    param2      (velocity/CC value, or pitch-bend MSB)
 ```
 
 Core 1 pushes events, core 0 pops and dispatches them. The ring buffer is lock-free and cross-core safe using memory barriers. If the queue overflows, Core 1 sets a boolean panic flag. When Core 0 reads this flag, it clears the queue and issues a `PANIC` event which immediately gates off all active voices to prevent hanging notes.
