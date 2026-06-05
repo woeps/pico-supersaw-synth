@@ -18,14 +18,33 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+      PICO_EXTRAS_PATH: ${{ github.workspace }}/pico-extras
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Pico SDK
-        uses: psf/rm-pico-action@v1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+      - name: Checkout Pico SDK
+        uses: actions/checkout@v4
         with:
-          pico-sdk-version: 2.1.1
+          repository: raspberrypi/pico-sdk
+          ref: 2.1.1
+          path: pico-sdk
+          submodules: recursive
+
+      - name: Checkout Pico Extras
+        uses: actions/checkout@v4
+        with:
+          repository: raspberrypi/pico-extras
+          ref: sdk-2.1.1
+          path: pico-extras
+          submodules: recursive
 
       - name: Configure
         run: cmake -B build -G Ninja
