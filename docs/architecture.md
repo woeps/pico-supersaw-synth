@@ -87,13 +87,15 @@ The shared `bandCache` (wavetable SRAM cache) and **voice struct mutations** are
 
 ## Preset Persistence (BOOTSEL Button)
 
-The BOOTSEL button on the Tiny2040 doubles as a user-facing preset control:
+The BOOTSEL button on the Pico doubles as a user-facing preset control. The
+Pico has a single (mono) onboard LED (GP25, active-high), so feedback uses
+on/off and blink patterns instead of colour:
 
 | Action | Effect | LED Feedback |
 |---|---|---|
-| Hold < 3 s, then release | Restore saved preset | Blue flash (500 ms) |
-| Hold ≥ 3 s | Entering save mode | Red blink (250 ms period) |
-| Hold ≥ 5 s (3 + 2) | Save current parameters | Green flash (500 ms) |
+| Hold < 3 s, then release | Restore saved preset | Single flash (500 ms) |
+| Hold ≥ 3 s | Entering save mode | Continuous blink (250 ms period) |
+| Hold ≥ 5 s (3 + 2) | Save current parameters | Triple flash (500 ms) |
 | Power-on / reboot | Auto-restore if valid preset exists | — |
 
 All 12 CC-controllable parameters are persisted as raw `uint8_t` values in a 256-byte flash page at the last 4 KB sector. The `preset_store` module handles flash erase/program, while `main.cpp` manages the button state machine and LED feedback.

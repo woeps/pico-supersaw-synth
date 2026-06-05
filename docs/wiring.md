@@ -4,19 +4,20 @@
 
 | Function | GPIO | Pico Pin | Notes |
 |----------|------|----------|-------|
-| I2S DATA | GP26 | Pin 31 | Serial audio data to DAC |
-| I2S BCK | GP27 | Pin 32 | Bit clock |
-| I2S LRCK | GP28 | Pin 34 | Word select (auto: BCK+1) |
-| MIDI RX | GP5 | Pin 7 | UART1 RX |
+| I2S DATA | GP3 | Pin 5 | Serial audio data to DAC |
+| I2S BCK | GP4 | Pin 6 | Bit clock |
+| I2S LRCK | GP5 | Pin 7 | Word select (auto: BCK+1) |
+| MIDI RX | GP9 | Pin 12 | UART1 RX |
+| Status LED | GP25 | — | Onboard LED (active-high) |
 
 ## PCM5102A DAC Wiring
 
 ```
-Pico                    PCM5102A
+Pico                    PCM5101A
 ─────                   ────────
-GP26 (DATA) ──────────► DIN
-GP27 (BCK)  ──────────► BCK
-GP28 (LRCK) ──────────► LCK
+GP3 (DATA)  ──────────► DIN
+GP4 (BCK)   ──────────► BCK
+GP5 (LRCK)  ──────────► LCK
 3V3         ──────────► VCC
 GND         ──────────► GND
                         SCK ──► GND (uses internal clock)
@@ -40,7 +41,7 @@ Pin 5 (data) ─────────────►┤ 2 (Cathode)   │
                        │   │               │
                        │   │     6 (VCC) ──┼──► 3V3
                        │   │               │
-                       │   │     5 (VO) ───┼──► GP5 (UART1 RX)
+                       │   │     5 (VO) ───┼──► GP9 (UART1 RX)
                        │   │               │
                        │   │     4 (NC)    │
                        │   └───────────────┘
@@ -55,7 +56,7 @@ Pin 2 (GND) ──► shield ground (do NOT connect to Pico GND directly)
 - **Pin 2 (Cathode)**: MIDI pin 5 (directly connected)
 - **Pin 3 (GND)**: Connect to Pico GND
 - **Pin 4 (NC)**: Not connected
-- **Pin 5 (VO)**: Output to GP5 (no pull-up needed, Schmitt trigger output)
+- **Pin 5 (VO)**: Output to GP9 (no pull-up needed, Schmitt trigger output)
 - **Pin 6 (VCC)**: Connect to 3V3
 
 ## Power

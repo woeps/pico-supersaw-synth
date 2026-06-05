@@ -120,16 +120,10 @@ int main() {
     stdio_init_all();
     printf("Supersaw MIDI Synth starting...\n");
     
-    // Initialize onboard RGB LED
-    gpio_init(LED_RED_PIN);
-    gpio_init(LED_GREEN_PIN);
-    gpio_init(LED_BLUE_PIN);
-    gpio_set_dir(LED_RED_PIN, GPIO_OUT);
-    gpio_set_dir(LED_GREEN_PIN, GPIO_OUT);
-    gpio_set_dir(LED_BLUE_PIN, GPIO_OUT);
-    gpio_put(LED_RED_PIN, 1);
-    gpio_put(LED_GREEN_PIN, 1);
-    gpio_put(LED_BLUE_PIN, 1);
+    // Initialize onboard LED (active-high on the Raspberry Pi Pico)
+    gpio_init(LED_PIN);
+    gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_put(LED_PIN, 0);
 
     supersaw.init();
 
@@ -231,37 +225,34 @@ int main() {
         }
 
         // ── LED control ──────────────────────────────────────────────
+        // The Pico has a single (mono) onboard LED, so the RGB colour cues
+        // used on the Tiny2040 are reduced to on/off + blink patterns:
+        //   - save pending (held 3-5 s) → continuous blink
+        //   - restore confirmed         → single solid flash
+        //   - save confirmed            → triple flash
+        //   - idle                      → on while any voice is active
+        bool ledOn;
         switch (btnState) {
-            case ButtonState::BLINK_RED: {
-                bool on = ((nowMs / BLINK_PERIOD_MS) & 1) == 0;
-                gpio_put(LED_RED_PIN, on ? 0 : 1);
-                gpio_put(LED_GREEN_PIN, 1);
-                gpio_put(LED_BLUE_PIN, 1);
-                break;
-            }
-            case ButtonState::FLASH_GREEN:
-                gpio_put(LED_RED_PIN, 1);
-                gpio_put(LED_GREEN_PIN, 0);
-                gpio_put(LED_BLUE_PIN, 1);
+            case ButtonState::BLINK_RED:
+                ledOn = ((nowMs / BLINK_PERIOD_MS) & 1) == 0;
                 break;
             case ButtonState::FLASH_BLUE:
-                gpio_put(LED_RED_PIN, 1);
-                gpio_put(LED_GREEN_PIN, 1);
-                gpio_put(LED_BLUE_PIN, 0);
+                // Restore: single flash → solid on for the whole window.
+                ledOn = true;
                 break;
+            case ButtonState::FLASH_GREEN: {
+                // Save: triple flash → 3 on-pulses across the flash window.
+                // 6 equal slots (on/off/on/off/on/off) yield three blinks.
+                uint32_t elapsed = nowMs - (btnFlashEndMs - FLASH_DURATION_MS);
+                uint32_t slot = elapsed / (FLASH_DURATION_MS / 6);
+                ledOn = (slot & 1) == 0;
+                break;
+            }
             default:
-                // Normal LED: green while any voice is active
-                if (supersaw.anyVoiceActive()) {
-                    gpio_put(LED_RED_PIN, 1);
-                    gpio_put(LED_GREEN_PIN, 0);
-                    gpio_put(LED_BLUE_PIN, 1);
-                } else {
-                    gpio_put(LED_RED_PIN, 1);
-                    gpio_put(LED_GREEN_PIN, 1);
-                    gpio_put(LED_BLUE_PIN, 1);
-                }
+                ledOn = supersaw.anyVoiceActive();
                 break;
         }
+        gpio_put(LED_PIN, ledOn ? 1 : 0);
 
         // Get an audio buffer from the pool (blocks until available)
         struct audio_buffer* buffer = take_audio_buffer(audioPool, true);
@@ -275,8 +266,8 @@ int main() {
             give_audio_buffer(audioPool, buffer);
         }
 
-        // Debug: use red LED to indicate digital clipping at the merge stage.
-        // The LED stays red for 100 ms each time clipping is detected.
+        // Debug: light the LED to indicate digital clipping at the merge stage.
+        // The LED stays on for 100 ms each time clipping is detected.
         {
             static uint32_t clipLedOffMs = 0;
             if (supersaw.dbgClipCount > 0) {
@@ -284,8 +275,7 @@ int main() {
                 clipLedOffMs = nowMs + 100;
             }
             if (clipLedOffMs > nowMs) {
-                gpio_put(LED_RED_PIN, 0);   // active-low: 0 = ON
-                gpio_put(LED_GREEN_PIN, 1); // turn off green
+                gpio_put(LED_PIN, 1);   // active-high: 1 = ON
             }
         }
     }
