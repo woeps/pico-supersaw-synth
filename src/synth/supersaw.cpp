@@ -182,8 +182,8 @@ void Supersaw::init() {
 }
 
 const int16_t* Supersaw::cacheAcquire(uint8_t bandIdx) {
+    // Fast path: band already cached.
     uint32_t save = spin_lock_blocking(cacheLock);
-    // Check if this band is already cached
     for (int i = 0; i < MAX_CACHED_BANDS; i++) {
         if (bandCache[i].bandIdx == static_cast<int8_t>(bandIdx)) {
             bandCache[i].refCount++;
@@ -191,17 +191,33 @@ const int16_t* Supersaw::cacheAcquire(uint8_t bandIdx) {
             return bandCache[i].data;
         }
     }
-    // Find an empty slot and copy from flash
+    spin_unlock(cacheLock, save);
+
+    // Slow flash read into the scratch buffer, performed with NO lock held so
+    // the other core is not stalled for the flash-read latency. Safe because
+    // cacheAcquire is only ever called from noteOn (Core 0), i.e. single-entry.
+    memcpy(cacheScratch, sawWavetable[bandIdx], WAVETABLE_SIZE * sizeof(int16_t));
+
+    // Re-lock and re-check: another path may have inserted the band meanwhile.
+    save = spin_lock_blocking(cacheLock);
+    for (int i = 0; i < MAX_CACHED_BANDS; i++) {
+        if (bandCache[i].bandIdx == static_cast<int8_t>(bandIdx)) {
+            bandCache[i].refCount++;
+            spin_unlock(cacheLock, save);
+            return bandCache[i].data;
+        }
+    }
+    // Find an empty slot and copy from scratch (fast SRAM→SRAM, lock held).
     for (int i = 0; i < MAX_CACHED_BANDS; i++) {
         if (bandCache[i].bandIdx < 0) {
-            memcpy(bandCache[i].data, sawWavetable[bandIdx], WAVETABLE_SIZE * sizeof(int16_t));
+            memcpy(bandCache[i].data, cacheScratch, WAVETABLE_SIZE * sizeof(int16_t));
             bandCache[i].bandIdx = static_cast<int8_t>(bandIdx);
             bandCache[i].refCount = 1;
             spin_unlock(cacheLock, save);
             return bandCache[i].data;
         }
     }
-    // Cache full — fall back to flash
+    // Cache full — fall back to flash.
     spin_unlock(cacheLock, save);
     return nullptr;
 }
@@ -367,7 +383,7 @@ bool Supersaw::anyVoiceActive() const {
     return false;
 }
 
-void Supersaw::renderVoiceSample(int startV, int endV,
+void Supersaw::accumulateVoices(int startV, int endV,
                                   int32_t& outL, int32_t& outR,
                                   int32_t sideGain) {
     static constexpr int32_t CENTER_GAIN = 50; // 50/256 ≈ 0.195 in Q8.8
@@ -472,7 +488,7 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
             }
         }
 
-        renderVoiceSample(0, 2, sampleL, sampleR, currentMix >> 8);
+        accumulateVoices(0, 2, sampleL, sampleR, currentMix >> 8);
 
         core0ScratchBuf[i * 2]     = sampleL;
         core0ScratchBuf[i * 2 + 1] = sampleR;
@@ -491,7 +507,7 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
         int32_t sampleR = core0ScratchBuf[i * 2 + 1] + core1ScratchBuf[i * 2 + 1];
 
         // Divide by 2: each voice is already normalized to ~16384 (half of
-        // int16_t range) by the ×10579>>16 factor in renderVoiceSample, so
+        // int16_t range) by the ×10579>>16 factor in accumulateVoices, so
         // four voices sum to ~65536 and only a ÷2 is needed to fit int16_t.
         sampleL >>= 1;
         sampleR >>= 1;
@@ -551,7 +567,7 @@ void Supersaw::renderCore1Voices(size_t numStereoSamples) {
             }
         }
 
-        renderVoiceSample(2, MAX_VOICES, sampleL, sampleR, core1SideGain);
+        accumulateVoices(2, MAX_VOICES, sampleL, sampleR, core1SideGain);
 
         core1ScratchBuf[i * 2]     = sampleL;
         core1ScratchBuf[i * 2 + 1] = sampleR;

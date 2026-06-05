@@ -6,6 +6,11 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Default to a Release build so the fixed-point DSP is optimized.
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 # Initialise pico_sdk from installed location
 # (note this can come from environment, CMake cache etc)
 
@@ -37,10 +42,10 @@ project(supersaw_midi_synth C CXX ASM)
 pico_sdk_init()
 
 # Find all source files in subdirectories
-file(GLOB_RECURSE SYNTH_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/synth/*.cpp")
-file(GLOB_RECURSE MIDI_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/midi/*.cpp")
-file(GLOB_RECURSE AUDIO_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/audio/*.cpp")
-file(GLOB_RECURSE CONFIG_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/config/*.cpp")
+file(GLOB_RECURSE SYNTH_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/synth/*.cpp")
+file(GLOB_RECURSE MIDI_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/midi/*.cpp")
+file(GLOB_RECURSE AUDIO_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/audio/*.cpp")
+file(GLOB_RECURSE CONFIG_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/config/*.cpp")
 
 add_executable(supersaw_midi_synth
     src/main.cpp
@@ -73,5 +78,8 @@ target_link_libraries(supersaw_midi_synth
 target_include_directories(supersaw_midi_synth PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/src
 )
+
+# Optimize the audio/DSP hot paths for the RP2040 (no FPU, fixed-point math).
+target_compile_options(supersaw_midi_synth PRIVATE -O3)
 
 pico_add_extra_outputs(supersaw_midi_synth)

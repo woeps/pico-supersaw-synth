@@ -40,7 +40,7 @@ bool midiEventAvailable() {
 bool midiEventPop(MidiEvent& event) {
     if (midiOverflowPanic) {
         midiOverflowPanic = false;
-        event = MidiEvent{MidiEventType::PANIC, 0, 0};
+        event = MidiEvent{MidiEventType::PANIC, 0, 0, 0};
         midiQueueTail = midiQueueHead; // Clear the queue
         return true;
     }
@@ -70,16 +70,17 @@ static void pushEvent(const MidiEvent& event) {
 
 static void dispatchEvent(uint8_t status, uint8_t d1, uint8_t d2) {
     uint8_t msgType = status & 0xF0;
+    uint8_t channel = status & 0x0F;
 
     if (msgType == 0x90 && d2 > 0) {
         // Note On
-        pushEvent(MidiEvent{MidiEventType::NOTE_ON, d1, d2});
+        pushEvent(MidiEvent{MidiEventType::NOTE_ON, channel, d1, d2});
     } else if (msgType == 0x80 || (msgType == 0x90 && d2 == 0)) {
         // Note Off (explicit or velocity-0 convention)
-        pushEvent(MidiEvent{MidiEventType::NOTE_OFF, d1, d2});
+        pushEvent(MidiEvent{MidiEventType::NOTE_OFF, channel, d1, d2});
     } else if (msgType == 0xB0) {
         // Control Change
-        pushEvent(MidiEvent{MidiEventType::CC, d1, d2});
+        pushEvent(MidiEvent{MidiEventType::CC, channel, d1, d2});
     }
 }
 

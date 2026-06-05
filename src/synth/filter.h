@@ -2,6 +2,7 @@
 #define FILTER_H
 
 #include <cstdint>
+#include "synth/filter_cutoff_table.h"
 
 namespace synth {
 
@@ -11,13 +12,6 @@ enum class FilterMode : uint8_t {
     HPF = 1,
     BPF = 2
 };
-
-// Precomputed cutoff coefficient table (128 entries, Q14).
-// Maps CC 0–127 → sin(π × fc / 44100) × 16384,
-// with fc on a piecewise-exponential curve:
-//   CC   0–80:  20 Hz → 8 kHz   (exponential)
-//   CC  80–127:  8 kHz → 16 kHz  (exponential, finer resolution)
-extern const int32_t filterCutoffTable[128];
 
 // State-variable clamp: ±2× the Q28 input level, giving the same
 // headroom ratio as the original ±32767 clamp at Q14.

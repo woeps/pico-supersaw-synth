@@ -71,16 +71,52 @@ static void capturePreset(const synth::Supersaw& ss, preset_store::Preset& p) {
 static synth::Supersaw supersaw;
 static struct audio_buffer_pool* audioPool = nullptr;
 
-// Pre-fill audio buffers with silence to cover flash erase/program duration (~50 ms).
-// This prevents I2S DMA underrun during the preset save operation.
-static void prefillSilenceForFlash() {
-    for (int i = 0; i < AUDIO_BUFFER_COUNT; i++) {
-        struct audio_buffer* buf = take_audio_buffer(audioPool, false);
-        if (buf) {
-            memset(buf->buffer->bytes, 0, buf->max_sample_count * 4);
-            buf->sample_count = buf->max_sample_count;
-            give_audio_buffer(audioPool, buf);
+// Number of buffers spanned by each fade (~5.8 ms per buffer → ~17 ms per fade).
+static constexpr int FADE_BUFFERS = 3;
+
+// Render `numBuffers` buffers while ramping a Q15 output gain from g0Q15 to
+// g1Q15. Interpolation is per-sample (not per-buffer) so the ramp is smooth
+// and click-free even across buffer boundaries. Unity gain = 32768.
+// The fade only scales rendered output — voice/envelope state is untouched, so
+// held notes resume correctly afterwards.
+static void renderWithFade(int32_t g0Q15, int32_t g1Q15, int numBuffers) {
+    // Total stereo frames across the whole fade; used as the interpolation span.
+    int64_t totalFrames = (int64_t)numBuffers * AUDIO_BUFFER_SAMPLES;
+    int64_t span = (totalFrames > 1) ? (totalFrames - 1) : 1;
+    int64_t frameIdx = 0;
+
+    for (int b = 0; b < numBuffers; b++) {
+        struct audio_buffer* buf = take_audio_buffer(audioPool, true);
+        if (!buf) continue;
+
+        int16_t* samples = (int16_t*)buf->buffer->bytes;
+        uint32_t numStereoSamples = buf->max_sample_count;
+        supersaw.render(samples, numStereoSamples);
+
+        for (uint32_t f = 0; f < numStereoSamples; f++) {
+            int32_t g = g0Q15 + (int32_t)(((int64_t)(g1Q15 - g0Q15) * frameIdx) / span);
+            samples[2 * f]     = (int16_t)(((int32_t)samples[2 * f]     * g) >> 15);
+            samples[2 * f + 1] = (int16_t)(((int32_t)samples[2 * f + 1] * g) >> 15);
+            if (frameIdx < span) frameIdx++;
         }
+
+        buf->sample_count = numStereoSamples;
+        give_audio_buffer(audioPool, buf);
+    }
+}
+
+// Flush zero-filled buffers with *blocking* takes until a zero buffer is
+// guaranteed to be the one in flight on the DMA. Each blocking take only
+// returns after the DMA IRQ frees a played buffer, so after AUDIO_BUFFER_COUNT+1
+// cycles every previously-queued (non-zero) buffer has been consumed. The flash
+// erase then freezes the PIO on a zero sample → clean silence, no DC click.
+static void flushSilenceInFlight() {
+    for (int i = 0; i < AUDIO_BUFFER_COUNT + 1; i++) {
+        struct audio_buffer* buf = take_audio_buffer(audioPool, true);
+        if (!buf) continue;
+        memset(buf->buffer->bytes, 0, buf->max_sample_count * 4);
+        buf->sample_count = buf->max_sample_count;
+        give_audio_buffer(audioPool, buf);
     }
 }
 
@@ -204,12 +240,17 @@ int main() {
                     // Released between 3–5 s without reaching save
                     btnState = ButtonState::IDLE;
                 } else if (nowMs - btnPressTimeMs >= SAVE_THRESHOLD_MS) {
-                    // Held 5 s → save preset
-                    // Pre-fill audio buffers with silence to cover flash erase (~50 ms)
-                    prefillSilenceForFlash();
+                    // Held 5 s → save preset.
+                    // The flash erase disables interrupts, freezing the I2S DMA
+                    // IRQ so no queued buffer can advance. To avoid a DC click we
+                    // fade out, flush a guaranteed-zero buffer into flight, write
+                    // flash (PIO freezes on silence), then fade back in.
+                    renderWithFade(32768, 0, FADE_BUFFERS);   // fade out to silence
+                    flushSilenceInFlight();                   // zero buffer in flight
                     preset_store::Preset p;
                     capturePreset(supersaw, p);
                     preset_store::save(p);
+                    renderWithFade(0, 32768, FADE_BUFFERS);   // fade back in
                     printf("Preset saved to flash.\n");
                     btnFlashEndMs = nowMs + FLASH_DURATION_MS;
                     btnState = ButtonState::FLASH_GREEN;

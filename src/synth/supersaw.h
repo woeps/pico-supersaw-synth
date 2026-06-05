@@ -121,6 +121,11 @@ struct Supersaw {
     };
     BandCacheEntry bandCache[MAX_CACHED_BANDS];
 
+    // Scratch buffer for flash → SRAM band copy, used so the slow flash read
+    // happens *outside* the cacheLock critical section. Only ever touched by
+    // cacheAcquire (Core 0 / noteOn), so single-entry use is safe.
+    int16_t cacheScratch[WAVETABLE_SIZE];
+
     void init();
     void noteOn(uint8_t note, uint8_t velocity);
     void noteOff(uint8_t note);
@@ -143,11 +148,11 @@ private:
     const int16_t* cacheAcquire(uint8_t bandIdx);
     void cacheRelease(int8_t bandIdx);
 
-    // Render a range of voices [startV, endV) for one sample.
+    // Accumulate a range of voices [startV, endV) for one sample.
     // Accumulates into outL/outR. Handles envelope tick, HPF, and cache release on IDLE.
-    void renderVoiceSample(int startV, int endV,
-                           int32_t& outL, int32_t& outR,
-                           int32_t sideGain);
+    void accumulateVoices(int startV, int endV,
+                          int32_t& outL, int32_t& outR,
+                          int32_t sideGain);
 };
 
 // Precomputed phase increment table (one entry per MIDI note 0–127).

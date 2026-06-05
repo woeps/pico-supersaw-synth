@@ -66,12 +66,12 @@
 
 ## 3. Structure
 
-* **Redundant Polling vs FIFOs:** Dual-core communication in `src/main.cpp` uses manual `while(true)` spin-loops with `volatile` flags. The Pico SDK's `multicore_fifo_push_blocking()` should be used instead.
-* **Misleading Function Scope:** `Supersaw::renderVoiceSample` accumulates into output references instead of returning a pair or passing the scratch buffer directly.
-* **MIDI Channel Data is Discarded:** In `src/midi/midi_input.cpp`, the MIDI channel is stripped, locking the synth into Omni mode and limiting future multi-timbral expansion.
-* **Hardcoded DMA and PIO Allocation:** `src/audio/audio_output.cpp` hardcodes DMA and PIO channels instead of using `dma_claim_unused_channel()`.
-* **CMake Globbing Anti-Pattern:** `CMakeLists.txt` uses `file(GLOB_RECURSE)` without `CONFIGURE_DEPENDS`, which fails to detect new files automatically.
-* **Fragile Regex File Patching:** `scripts/generate_filter_table.py` modifies `src/synth/filter.cpp` in-place using a brittle regex, prone to breaking on minor formatting changes.
+* **[INVALID] Redundant Polling vs FIFOs:** Dual-core communication in `src/main.cpp` uses manual `while(true)` spin-loops with `volatile` flags. Core 1 must poll MIDI UART continuously while also servicing render commands from Core 0. `multicore_fifo_push_blocking()` would block Core 1 and starve MIDI input. The current spin-loop + volatile flag is the correct dual-duty pattern.
+* **[FIXED] Misleading Function Scope:** `Supersaw::renderVoiceSample` renamed to `accumulateVoices` to clearly communicate the accumulation semantics.
+* **[FIXED] MIDI Channel Data is Discarded:** Added `channel` field to `MidiEvent`; packed/unpacked alongside existing fields. Synth continues in Omni mode but the data is preserved for future use.
+* **[FIXED] Hardcoded DMA and PIO Allocation:** Replaced with `dma_claim_unused_channel(true)` and `pio_claim_unused_sm(pio0, true)`.
+* **[FIXED] CMake Globbing Anti-Pattern:** Added `CONFIGURE_DEPENDS` to all `file(GLOB_RECURSE ...)` calls.
+* **[FIXED] Fragile Regex File Patching:** `scripts/generate_filter_table.py` now generates a standalone `src/synth/filter_cutoff_table.h` header instead of regex-patching `filter.cpp`.
 
 ---
 

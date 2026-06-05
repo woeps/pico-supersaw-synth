@@ -48,7 +48,8 @@ MIDI IN (UART1 RX) → MIDI Parser → Software Ring Buffer → Voice Allocator
 MIDI events use a lock-free, single-producer, single-consumer software ring buffer (256 elements deep). Each event is packed into a 32-bit word:
 
 ```
-Bits [17:16]  event type  (NOTE_ON / NOTE_OFF / CC)
+Bits [23:20]  channel     (MIDI channel 0–15, preserved for future use)
+Bits [17:16]  event type  (NOTE_ON / NOTE_OFF / CC / PANIC)
 Bits [14:8]   param1      (note number or CC number)
 Bits [6:0]    param2      (velocity or CC value)
 ```
@@ -69,7 +70,7 @@ Core 1 polls `core1RenderCmd != 0` alongside MIDI, ensuring sub-microsecond resp
 
 **Snapshot Protocol**: Core 0 snapshots the smoothed parameters (`currentMix`, `currentDetune`) into dedicated fields before signaling Core 1. Core 1 reads these frozen values via its own `__dmb()` barrier instead of the live values that Core 0 continues to smooth during its own render. This prevents data races on the per-sample smoothed parameters.
 
-The shared `bandCache` (wavetable SRAM cache) and **voice struct mutations** are protected by the same RP2040 hardware spinlock (`cacheLock`). Both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering. Core 0's `noteOn()` and `noteOff()` also hold this spinlock while mutating voice fields (`note`, `velocity`, `active`, `age`, `env`) to prevent Core 1 from reading a partially-written voice struct.
+The shared `bandCache` (wavetable SRAM cache) and **voice struct mutations** are protected by the same RP2040 hardware spinlock (`cacheLock`). Both cores may call `cacheRelease()` when a voice envelope reaches IDLE during parallel rendering. Core 0's `noteOn()` and `noteOff()` also hold this spinlock while mutating voice fields (`note`, `velocity`, `active`, `age`, `env`) to prevent Core 1 from reading a partially-written voice struct. `cacheAcquire()` keeps its critical section minimal by staging the slow 4 KB flash read through a lock-free `cacheScratch` buffer and re-acquiring `cacheLock` only for the fast SRAM→SRAM copy into a cache slot.
 
 ## Module Responsibilities
 

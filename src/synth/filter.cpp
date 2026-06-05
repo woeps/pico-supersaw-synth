@@ -1,29 +1,7 @@
 #include "synth/filter.h"
+#include "synth/filter_cutoff_table.h"
 
 namespace synth {
-
-// Piecewise-exponential cutoff coefficients (Q14):
-//   CC   0–80:  20 Hz → 8000 Hz  (exponential)
-//   CC 80–127: 8000 Hz → 16000 Hz  (exponential, finer resolution)
-// coeff = tan(π × fc / 44100) × 16384
-const int32_t filterCutoffTable[128] = {
-       23,    25,    27,    29,    31,    34,    37,    39,
-       42,    46,    49,    53,    57,    62,    67,    72,
-       77,    83,    90,    97,   104,   113,   121,   131,
-      141,   152,   164,   176,   190,   205,   221,   238,
-      256,   276,   298,   321,   346,   373,   402,   433,
-      467,   503,   543,   585,   630,   679,   732,   789,
-      851,   917,   988,  1066,  1149,  1238,  1335,  1439,
-     1552,  1674,  1805,  1946,  2099,  2265,  2443,  2636,
-     2845,  3071,  3317,  3582,  3871,  4184,  4525,  4897,
-     5303,  5747,  6235,  6771,  7363,  8020,  8752,  9573,
-    10499, 10696, 10898, 11105, 11318, 11537, 11762, 11993,
-    12231, 12476, 12728, 12988, 13256, 13532, 13817, 14111,
-    14416, 14730, 15056, 15393, 15742, 16104, 16480, 16871,
-    17277, 17700, 18141, 18600, 19080, 19581, 20106, 20656,
-    21233, 21840, 22478, 23152, 23862, 24615, 25412, 26259,
-    27161, 28123, 29153, 30257, 31446, 32730, 34120, 35631,
-};
 
 void SVFilter::init() {
     s1_L = s2_L = 0;
@@ -89,10 +67,17 @@ void SVFilter::process(int16_t& left, int16_t& right) {
     int32_t g = cutoffCoeff;   // Q14
     int32_t R = dampCoeff;     // Q14
 
+    // Shift Q28 state down by 14 *before* multiplying by the Q14 coefficient,
+    // keeping the products in 32-bit (avoids slow 64-bit software multiplies).
+    // s1 max = STATE_MAX (2^28) → s1 >> 14 ≈ 16384; R/g max ≈ 35631
+    // → product ≈ 5.8e8, well within int32_t.
+    int32_t s1_L_q14 = s1_L >> 14;
+    int32_t s1_R_q14 = s1_R >> 14;
+
     // ---- Left channel ZDF Trapezoidal SVF (Q28 internals) ----
     int64_t hp_num_L = (int64_t)in_l
-                     - ((1LL * R * s1_L) >> 14)
-                     - ((1LL * g * s1_L) >> 14)
+                     - (R * s1_L_q14)
+                     - (g * s1_L_q14)
                      - s2_L;
     int32_t hp_L = static_cast<int32_t>((hp_num_L * invD) >> 14);
     int32_t v1_L = static_cast<int32_t>(((int64_t)g * hp_L) >> 14);
@@ -109,8 +94,8 @@ void SVFilter::process(int16_t& left, int16_t& right) {
 
     // ---- Right channel ZDF Trapezoidal SVF (Q28 internals) ----
     int64_t hp_num_R = (int64_t)in_r
-                     - ((1LL * R * s1_R) >> 14)
-                     - ((1LL * g * s1_R) >> 14)
+                     - (R * s1_R_q14)
+                     - (g * s1_R_q14)
                      - s2_R;
     int32_t hp_R = static_cast<int32_t>((hp_num_R * invD) >> 14);
     int32_t v1_R = static_cast<int32_t>(((int64_t)g * hp_R) >> 14);

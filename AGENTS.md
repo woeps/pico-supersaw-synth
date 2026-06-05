@@ -76,7 +76,7 @@ There is no dedicated linter script configured. A `compile_commands.json` is gen
 Python scripts are used to precompute lookup tables and wavetables. If you modify core math logic or oscillator parameters, run these scripts to regenerate the C++ source files:
 ```bash
 python3 scripts/generate_tables.py
-python3 scripts/generate_filter_table.py
+python3 scripts/generate_filter_table.py --write
 ```
 
 ## 2. Code Style Guidelines
