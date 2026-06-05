@@ -25,12 +25,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/build-firmware.yml') }}
+          restore-keys: apt-${{ runner.os }}-
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
 
+      - name: Cache Pico SDK
+        uses: actions/cache@v4
+        id: cache-pico-sdk
+        with:
+          path: pico-sdk
+          key: pico-sdk-2.1.1-${{ runner.os }}
+
+      - name: Cache Pico Extras
+        uses: actions/cache@v4
+        id: cache-pico-extras
+        with:
+          path: pico-extras
+          key: pico-extras-sdk-2.1.1-${{ runner.os }}
+
       - name: Checkout Pico SDK
+        if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: raspberrypi/pico-sdk
@@ -39,6 +61,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Pico Extras
+        if: steps.cache-pico-extras.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: raspberrypi/pico-extras
