@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libnewlib-arm-none-eabi \
     libstdc++-arm-none-eabi-newlib \
     git \
+    python3 \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
