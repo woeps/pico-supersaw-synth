@@ -96,13 +96,15 @@ At mix = 0, only the center oscillator is audible (thin, single-saw tone). At mi
 
 ## Parameter Smoothing
 
-The mix and detune parameters use **one-pole exponential slew** to prevent zipper noise during CC sweeps:
+The mix, detune, and filter cutoff parameters use **one-pole exponential slew** to prevent zipper noise during CC sweeps:
 
 ```
 currentValue += (targetValue - currentValue) >> 6    // ~1 ms slew @ 44.1 kHz
 ```
 
 CC changes write to a target value; the render loop smoothly interpolates toward it each sample. Detune phase increment recalculation is amortized to every 32 samples (~0.7 ms) to spread the cost of 7 multiplies × 4 voices.
+
+The filter cutoff is smoothed the same way: `SVFilter::setCutoff()` only sets `targetCutoffCoeff`, and `SVFilter::tickSmoothing()` slews `cutoffCoeff` toward it and recomputes the `D`/`invD` coefficients. This recompute is amortized to every 32 samples in the Core 0 merge loop, keeping it off the per-sample path while preventing the audible clicks that abrupt jumps across the exponential cutoff table would otherwise produce.
 
 ## Phase Increment Calculation
 
@@ -177,7 +179,7 @@ Coefficients and math use Q14 fixed-point or combinations thereof. State variabl
 
 The cutoff coefficient `g` is precomputed as a 128-entry flash lookup table mapping CC values to `tan(π × fc / 44100) × 16384`, with `fc` exponentially mapped from 20 Hz to 16 kHz. This avoids runtime trigonometry.
 
-The denominator (`D = 1 + 2Rg + g^2`) is precomputed whenever the Cutoff or Resonance MIDI CCs are modified, avoiding evaluation on every audio sample.
+The denominator (`D = 1 + 2Rg + g^2`) is precomputed whenever the Cutoff or Resonance MIDI CCs are modified, avoiding evaluation on every audio sample. For cutoff changes the recompute happens inside `tickSmoothing()` (every 32 samples) as the smoothed `cutoffCoeff` slews toward its target; resonance changes recompute it immediately in `setResonance()`.
 
 ### MIDI Control
 

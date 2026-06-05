@@ -502,7 +502,16 @@ void Supersaw::render(int16_t* buffer, size_t numStereoSamples) {
 
     // Merge both int32_t scratch buffers, normalize, clamp, and apply chorus
     uint32_t localClips = 0;
+    uint8_t filterSmoothCounter = 0;
     for (size_t i = 0; i < numStereoSamples; i++) {
+        // Periodically slew the filter cutoff toward its target (mirrors the
+        // detune-smoothing cadence). Keeps the D/invD recompute off the
+        // per-sample path.
+        if (++filterSmoothCounter >= 32) {
+            filterSmoothCounter = 0;
+            filter.tickSmoothing();
+        }
+
         int32_t sampleL = core0ScratchBuf[i * 2]     + core1ScratchBuf[i * 2];
         int32_t sampleR = core0ScratchBuf[i * 2 + 1] + core1ScratchBuf[i * 2 + 1];
 

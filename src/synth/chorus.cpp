@@ -71,6 +71,11 @@ static constexpr uint16_t DELAY_CENTER = 441;
 // Delay sweep depth: ±5 ms in samples = ±220
 static constexpr uint16_t DELAY_SWEEP = 220;
 
+// 90° phase offset for the right-channel LFO. The phase accumulator's upper
+// 8 bits index the 256-entry table, so a quarter cycle = 64 entries, placed
+// in those upper bits (64 << 24).
+static constexpr uint32_t LFO_QUARTER_PHASE = 64u << 24;
+
 void StereoChorus::init() {
     memset(delayBufL, 0, sizeof(delayBufL));
     memset(delayBufR, 0, sizeof(delayBufR));
@@ -117,7 +122,7 @@ void StereoChorus::process(int16_t& left, int16_t& right) {
                  + (((chorusLfoTable[static_cast<uint8_t>(idxL + 1)] - chorusLfoTable[idxL]) * fracLfoL) >> 8);
 
     // R channel: 90° out of phase (offset by 64 in 256-entry table)
-    uint32_t phaseR = lfoPhase + (64u << 24);
+    uint32_t phaseR = lfoPhase + LFO_QUARTER_PHASE;
     uint8_t idxR = static_cast<uint8_t>(phaseR >> 24);
     uint8_t fracLfoR = static_cast<uint8_t>(phaseR >> 16);
     int32_t lfoR = chorusLfoTable[idxR]

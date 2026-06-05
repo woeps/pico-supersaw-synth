@@ -77,6 +77,7 @@ Python scripts are used to precompute lookup tables and wavetables. If you modif
 ```bash
 python3 scripts/generate_tables.py
 python3 scripts/generate_filter_table.py --write
+python3 scripts/generate_velocity_table.py
 ```
 
 ## 2. Code Style Guidelines

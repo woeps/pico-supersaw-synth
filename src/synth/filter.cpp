@@ -7,6 +7,7 @@ void SVFilter::init() {
     s1_L = s2_L = 0;
     s1_R = s2_R = 0;
     cutoffCoeff = filterCutoffTable[127]; // wide open
+    targetCutoffCoeff = cutoffCoeff;      // smoothing target starts at open value
     dampCoeff = 32768;                    // Q=0.5 (no resonance)
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
@@ -18,7 +19,21 @@ void SVFilter::init() {
 
 void SVFilter::setCutoff(uint8_t cc) {
     if (cc > 127) cc = 127;
-    cutoffCoeff = filterCutoffTable[cc];
+    // Only set the smoothing target; cutoffCoeff slews toward it in
+    // tickSmoothing() so abrupt CC changes don't cause zipper noise.
+    targetCutoffCoeff = filterCutoffTable[cc];
+}
+
+void SVFilter::tickSmoothing() {
+    int32_t delta = targetCutoffCoeff - cutoffCoeff;
+    if (delta == 0) return;
+    // One-pole slew toward the target. Snap when the remaining delta is tiny
+    // to avoid a long crawl of single-LSB updates.
+    if (delta > -64 && delta < 64) {
+        cutoffCoeff = targetCutoffCoeff;
+    } else {
+        cutoffCoeff += delta >> 6;
+    }
     int32_t g = cutoffCoeff;
     int32_t R = dampCoeff;
     D = (1 << 14) + ((1LL * R * g) >> 14) + ((1LL * g * g) >> 14);

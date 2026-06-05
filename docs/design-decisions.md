@@ -104,7 +104,7 @@ Several design choices are specifically modeled after the Roland JP-8000 supersa
 - **Asymmetric detune:** Coefficients derived from JP firmware. Unequal positive/negative pairs prevent periodic beating.
 - **Non-linear detune curve:** Piecewise-linear LUT gives fine control at low settings, exponential ramp at high values.
 - **Mix control:** Center oscillator at fixed ~0.195 gain, sides controlled by CC 95. Matches the JP's two primary timbral controls (detune + mix).
-- **Parameter smoothing:** One-pole slew on mix and detune prevents zipper noise during CC sweeps (~1 ms time constant).
+- **Parameter smoothing:** One-pole slew on mix, detune, and filter cutoff prevents zipper noise during CC sweeps (~1 ms time constant). Cutoff slewing and its `D`/`invD` recompute run via `SVFilter::tickSmoothing()`, amortized to every 32 samples.
 - **DC-blocking HPF:** Single-pole high-pass filter (~20 Hz) per voice removes DC offset and sub-fundamental energy. Uses Q14 fixed-point to stay within `int32_t` range on M0+.
 - **Naive saw character:** Raw phase accumulator for low notes adds the bright, shimmery aliasing characteristic of the JP-8000.
 - **Stereo chorus:** Post-mix stereo chorus with modulated delay lines, matching the JP-8000's approach of mono supersaw → stereo chorus for width.

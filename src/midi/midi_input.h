@@ -21,19 +21,30 @@ struct MidiEvent {
     uint8_t param1;  // note number or CC number (0–127)
     uint8_t param2;  // velocity or CC value     (0–127)
 
+    // Packed-word field positions. Shifts give the bit offset of each field;
+    // masks are applied to the raw (unshifted) value before/after shifting.
+    static constexpr uint32_t CHANNEL_SHIFT = 20;
+    static constexpr uint32_t CHANNEL_MASK  = 0x0F; // 4 bits: channel 0–15
+    static constexpr uint32_t TYPE_SHIFT    = 16;
+    static constexpr uint32_t TYPE_MASK     = 0x03; // 2 bits: MidiEventType
+    static constexpr uint32_t PARAM1_SHIFT  = 8;
+    static constexpr uint32_t PARAM1_MASK   = 0x7F; // 7 bits: 0–127
+    static constexpr uint32_t PARAM2_SHIFT  = 0;
+    static constexpr uint32_t PARAM2_MASK   = 0x7F; // 7 bits: 0–127
+
     uint32_t pack() const {
-        return (static_cast<uint32_t>(channel & 0x0F) << 20) |
-               (static_cast<uint32_t>(type) << 16) |
-               (static_cast<uint32_t>(param1 & 0x7F) << 8) |
-               static_cast<uint32_t>(param2 & 0x7F);
+        return (static_cast<uint32_t>(channel & CHANNEL_MASK) << CHANNEL_SHIFT) |
+               (static_cast<uint32_t>(type) << TYPE_SHIFT) |
+               (static_cast<uint32_t>(param1 & PARAM1_MASK) << PARAM1_SHIFT) |
+               (static_cast<uint32_t>(param2 & PARAM2_MASK) << PARAM2_SHIFT);
     }
 
     static MidiEvent unpack(uint32_t data) {
         MidiEvent e;
-        e.channel = static_cast<uint8_t>((data >> 20) & 0x0F);
-        e.type    = static_cast<MidiEventType>((data >> 16) & 0x03);
-        e.param1  = static_cast<uint8_t>((data >> 8) & 0x7F);
-        e.param2  = static_cast<uint8_t>(data & 0x7F);
+        e.channel = static_cast<uint8_t>((data >> CHANNEL_SHIFT) & CHANNEL_MASK);
+        e.type    = static_cast<MidiEventType>((data >> TYPE_SHIFT) & TYPE_MASK);
+        e.param1  = static_cast<uint8_t>((data >> PARAM1_SHIFT) & PARAM1_MASK);
+        e.param2  = static_cast<uint8_t>((data >> PARAM2_SHIFT) & PARAM2_MASK);
         return e;
     }
 };

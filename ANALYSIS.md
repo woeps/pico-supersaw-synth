@@ -77,9 +77,9 @@
 
 ## 4. Readability & Comprehension
 
-* **Missing Parameter Smoothing on Cutoff:** Changes to the Cutoff MIDI CC trigger massive numerical leaps in the exponential table, generating audible clicks.
-* **Constant Obfuscation in `StereoChorus`:** The magic number `64u << 24` is used for a 90° phase offset. It should be defined as a named constant.
-* **Magic Numbers in Event Packing:** `MidiEvent::pack()` uses raw integer shifts and masks instead of named bitfield constants.
-* **Misleading Comment Regarding Struct Size:** The comment in `preset_store.h` incorrectly claims the struct is 17 bytes instead of its padded 20 bytes.
-* **Misleading Dead Code in Filter Generation:** A defensive check for `fc > 22000.0` in `generate_filter_table.py` is mathematically unreachable and misleads the reader.
-* **Undocumented Script Alignment:** `generate_velocity_table.py` is not documented in `AGENTS.md`, leaving new developers unaware it needs to be run.
+* **[FIXED] Missing Parameter Smoothing on Cutoff:** Changes to the Cutoff MIDI CC trigger massive numerical leaps in the exponential table, generating audible clicks. *Fixed: `SVFilter::setCutoff()` now sets `targetCutoffCoeff` only; `SVFilter::tickSmoothing()` (`src/synth/filter.cpp`) one-pole slews `cutoffCoeff` toward the target and recomputes `D`/`invD`. Called every 32 samples in the Core 0 merge loop (`Supersaw::render()` in `src/synth/supersaw.cpp`), mirroring the mix/detune smoothing cadence.*
+* **[FIXED] Constant Obfuscation in `StereoChorus`:** The magic number `64u << 24` is used for a 90° phase offset. It should be defined as a named constant. *Fixed: replaced with `LFO_QUARTER_PHASE` in `src/synth/chorus.cpp`.*
+* **[FIXED] Magic Numbers in Event Packing:** `MidiEvent::pack()` uses raw integer shifts and masks instead of named bitfield constants. *Fixed: added `CHANNEL_SHIFT/MASK`, `TYPE_SHIFT/MASK`, `PARAM1_SHIFT/MASK`, `PARAM2_SHIFT/MASK` constants used by both `pack()` and `unpack()` in `src/midi/midi_input.h`.*
+* **[NOT VALID] Misleading Comment Regarding Struct Size:** The analysis claimed `preset_store.h` incorrectly states 17 bytes instead of a padded 20 bytes. *This is not valid: `struct Preset` is declared `__attribute__((packed))` (`src/config/preset_store.h`), so there is no padding and `sizeof(Preset)` is exactly 17 bytes (4 + 1 + 12). The existing comment is correct.*
+* **[FIXED] Misleading Dead Code in Filter Generation:** A defensive check for `fc > 22000.0` in `generate_filter_table.py` is mathematically unreachable and misleads the reader. *Fixed: removed the clamp (max `fc` is `FREQ_MAX = 16000`, below Nyquist 22050). Output table is unchanged, so `filter_cutoff_table.h` was not regenerated.*
+* **[FIXED] Undocumented Script Alignment:** `generate_velocity_table.py` is not documented in `AGENTS.md`, leaving new developers unaware it needs to be run. *Fixed: added to the "Generating Tables" section of `AGENTS.md`.*

@@ -42,10 +42,8 @@ def compute_cutoff_table() -> list[int]:
             # Segment 2: exponential from FREQ_BREAK to FREQ_MAX
             t = (cc - CC_BREAK) / (127 - CC_BREAK)
             fc = FREQ_BREAK * pow(FREQ_MAX / FREQ_BREAK, t)
-        # Limit fc to avoid infinity approaching Nyquist
-        if fc > 22000.0:
-            fc = 22000.0
-
+        # fc never exceeds FREQ_MAX (16000 Hz), which is well below Nyquist
+        # (SAMPLE_RATE / 2 = 22050 Hz), so no clamp is needed.
         coeff = math.tan(math.pi * fc / SAMPLE_RATE) * 16384.0
         table.append(max(1, int(coeff + 0.5)))
     return table
