@@ -7,10 +7,10 @@
 namespace preset_store {
 
 // Number of CC parameters stored in a preset.
-#define PRESET_CC_COUNT 12
+#define PRESET_CC_COUNT 13
 
 // Preset data layout stored in flash.
-// Total: 4 (magic) + 1 (version) + 12 (CC values) = 17 bytes, padded to 256.
+// Total: 4 (magic) + 1 (version) + 13 (CC values) = 18 bytes, padded to 256.
 struct __attribute__((packed)) Preset {
     uint32_t magic;
     uint8_t  version;
@@ -18,11 +18,12 @@ struct __attribute__((packed)) Preset {
 };
 
 static constexpr uint32_t PRESET_MAGIC   = 0x53415750; // "SAWP"
-static constexpr uint8_t  PRESET_VERSION = 1;
+static constexpr uint8_t  PRESET_VERSION = 2;
 
 // Index mapping: which CC number corresponds to each slot in cc[].
 // Order: attack, decay, sustain, release, detune, spread, mix,
-//        chorus_depth, chorus_rate, filter_cutoff, filter_reso, filter_mode.
+//        chorus_depth, chorus_rate, filter_cutoff, filter_reso, filter_mode,
+//        pitchbend_range.
 extern const uint8_t presetCCMap[PRESET_CC_COUNT];
 
 // Save a preset to the last sector of flash.

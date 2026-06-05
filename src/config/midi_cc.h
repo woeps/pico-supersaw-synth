@@ -15,5 +15,6 @@
 #define CC_FILTER_CUTOFF 74
 #define CC_FILTER_RESO   71
 #define CC_FILTER_MODE   70
+#define CC_PITCHBEND_RANGE 85
 
 #endif // MIDI_CC_H

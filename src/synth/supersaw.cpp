@@ -153,6 +153,12 @@ void Supersaw::init() {
     rawCC[CC_FILTER_CUTOFF] = 127;
     rawCC[CC_FILTER_RESO]   = 0;
     rawCC[CC_FILTER_MODE]   = 0;
+    rawCC[CC_PITCHBEND_RANGE] = 21; // ≈ 4 semitones (round(4 × 127 / 24))
+
+    // Pitch bend defaults: centred, 4-semitone range, unity multiplier
+    bendRange    = 4;
+    lastBend14   = 8192;
+    pitchBendMul = 65536; // Q16.16 unity
 
     // Initialize parameter smoothing
     targetMix = currentMix = 65536;  // Q16.16: 65536 = full side gain (256 in Q8.8)
@@ -351,11 +357,37 @@ void Supersaw::setCC(uint8_t cc, uint8_t value) {
         filter.setResonance(value);
     } else if (cc == CC_FILTER_MODE) {
         filter.setMode(value);
+    } else if (cc == CC_PITCHBEND_RANGE) {
+        // Map 0–127 → 0–PITCHBEND_MAX_SEMITONES semitones.
+        bendRange = static_cast<uint8_t>(
+            (static_cast<uint32_t>(value) * PITCHBEND_MAX_SEMITONES) / 127);
+        recalcPitchBend();
     }
 }
 
+void Supersaw::pitchBend(uint16_t value14) {
+    if (value14 > 16383) value14 = 16383;
+    lastBend14 = value14;
+    recalcPitchBend();
+}
+
+void Supersaw::recalcPitchBend() {
+    // Integer index into the precomputed Q16.16 ratio table:
+    //   semitoneOffset = (lastBend14 - 8192) / 8192 × bendRange
+    //   idx = semitoneOffset × STEPS_PER_SEMITONE + CENTER_INDEX
+    int32_t offset = static_cast<int32_t>(lastBend14) - 8192; // -8192..+8191
+    int32_t idx = (offset * static_cast<int32_t>(bendRange) *
+                   PITCHBEND_STEPS_PER_SEMITONE) / 8192 + PITCHBEND_CENTER_INDEX;
+    if (idx < 0) idx = 0;
+    if (idx >= PITCHBEND_TABLE_SIZE) idx = PITCHBEND_TABLE_SIZE - 1;
+    pitchBendMul = pitchBendRatioTable[idx];
+}
+
 void Supersaw::updateDetuneForVoice(Voice& v, uint8_t detuneAmount) {
-    uint32_t baseInc = midiNotePhaseInc[v.note];
+    // Apply the global pitch-bend multiplier (Q16.16) to the base increment so
+    // the bend tracks all oscillators and voices on both cores.
+    uint32_t baseInc = static_cast<uint32_t>(
+        (static_cast<uint64_t>(midiNotePhaseInc[v.note]) * pitchBendMul) >> 16);
     for (int i = 0; i < NUM_OSCILLATORS; i++) {
         // Interpolate between unity (65536) and max-detune multiplier
         int32_t offset = (static_cast<int32_t>(detuneMaxOffset[i]) * detuneAmount) / 255;

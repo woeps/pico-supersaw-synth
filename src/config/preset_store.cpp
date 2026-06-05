@@ -22,6 +22,7 @@ const uint8_t presetCCMap[PRESET_CC_COUNT] = {
     CC_FILTER_CUTOFF,
     CC_FILTER_RESO,
     CC_FILTER_MODE,
+    CC_PITCHBEND_RANGE,
 };
 
 // Use the last sector of flash for preset storage.

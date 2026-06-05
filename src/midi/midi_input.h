@@ -7,26 +7,27 @@
 namespace midi {
 
 enum class MidiEventType : uint8_t {
-    NOTE_ON  = 0,
-    NOTE_OFF = 1,
-    CC       = 2,
-    PANIC    = 3,
+    NOTE_ON    = 0,
+    NOTE_OFF   = 1,
+    CC         = 2,
+    PANIC      = 3,
+    PITCH_BEND = 4,
 };
 
 // MIDI event packed into 32 bits for multicore FIFO.
-// Bit layout: [23:20] channel, [17:16] type, [14:8] param1, [6:0] param2
+// Bit layout: [23:20] channel, [18:16] type, [14:8] param1, [6:0] param2
 struct MidiEvent {
     MidiEventType type;
     uint8_t channel; // MIDI channel 0–15 (Omni mode ignores this for now)
-    uint8_t param1;  // note number or CC number (0–127)
-    uint8_t param2;  // velocity or CC value     (0–127)
+    uint8_t param1;  // note/CC number, or pitch-bend LSB (0–127)
+    uint8_t param2;  // velocity/CC value, or pitch-bend MSB (0–127)
 
     // Packed-word field positions. Shifts give the bit offset of each field;
     // masks are applied to the raw (unshifted) value before/after shifting.
     static constexpr uint32_t CHANNEL_SHIFT = 20;
     static constexpr uint32_t CHANNEL_MASK  = 0x0F; // 4 bits: channel 0–15
     static constexpr uint32_t TYPE_SHIFT    = 16;
-    static constexpr uint32_t TYPE_MASK     = 0x03; // 2 bits: MidiEventType
+    static constexpr uint32_t TYPE_MASK     = 0x07; // 3 bits: MidiEventType
     static constexpr uint32_t PARAM1_SHIFT  = 8;
     static constexpr uint32_t PARAM1_MASK   = 0x7F; // 7 bits: 0–127
     static constexpr uint32_t PARAM2_SHIFT  = 0;

@@ -196,6 +196,11 @@ int main() {
                 case midi::MidiEventType::PANIC:
                     supersaw.panic();
                     break;
+                case midi::MidiEventType::PITCH_BEND:
+                    // Reassemble 14-bit value: param2 = MSB, param1 = LSB.
+                    supersaw.pitchBend(
+                        (static_cast<uint16_t>(event.param2) << 7) | event.param1);
+                    break;
             }
         }
 

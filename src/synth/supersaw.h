@@ -10,6 +10,7 @@
 #include "synth/filter.h"
 #include "synth/saw_wavetable.h"
 #include "synth/velocity_table.h"
+#include "synth/pitchbend_table.h"
 
 #define NUM_OSCILLATORS 7
 #define MAX_VOICES 4
@@ -73,6 +74,11 @@ struct Supersaw {
     uint8_t spread;        // 0–127 (CC value)
     uint8_t mixAmount;     // 0–127 (CC value), 0 = center only, 127 = full supersaw
 
+    // Pitch bend state (control path only; read by both cores in updateDetuneForVoice).
+    uint8_t  bendRange;     // configurable range in semitones (default 4)
+    uint16_t lastBend14;    // last raw 14-bit bend value (centre = 8192)
+    uint32_t pitchBendMul;  // current frequency-ratio multiplier, Q16.16 (65536 = unity)
+
     // Parameter smoothing (one-pole slew to prevent zipper noise)
     int32_t currentMix;        // smoothed side gain, Q16.16
     int32_t targetMix;         // target side gain, Q16.16
@@ -131,6 +137,7 @@ struct Supersaw {
     void noteOff(uint8_t note);
     void panic();
     void setCC(uint8_t cc, uint8_t value);
+    void pitchBend(uint16_t value14);
     void render(int16_t* buffer, size_t numStereoSamples);
 
     // Called by Core 1: renders voices 2–3 into core1ScratchBuf.
@@ -144,6 +151,7 @@ struct Supersaw {
 private:
     void updateDetuneForVoice(Voice& v, uint8_t detuneAmount);
     void recalcSpread();
+    void recalcPitchBend();
     static uint32_t ccToEnvInc(uint8_t cc);
     const int16_t* cacheAcquire(uint8_t bandIdx);
     void cacheRelease(int8_t bandIdx);

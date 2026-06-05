@@ -81,6 +81,9 @@ static void dispatchEvent(uint8_t status, uint8_t d1, uint8_t d2) {
     } else if (msgType == 0xB0) {
         // Control Change
         pushEvent(MidiEvent{MidiEventType::CC, channel, d1, d2});
+    } else if (msgType == 0xE0) {
+        // Pitch Bend: d1 = LSB, d2 = MSB (each 7-bit). Reassembled by Core 0.
+        pushEvent(MidiEvent{MidiEventType::PITCH_BEND, channel, d1, d2});
     }
 }
 
@@ -96,7 +99,8 @@ void midiPoll() {
         if (byte & 0x80) {
             // Status byte
             uint8_t msgType = byte & 0xF0;
-            if (msgType == 0x80 || msgType == 0x90 || msgType == 0xB0) {
+            if (msgType == 0x80 || msgType == 0x90 ||
+                msgType == 0xB0 || msgType == 0xE0) {
                 statusByte = byte;
                 parserState = ParserState::IDLE;
             } else {
