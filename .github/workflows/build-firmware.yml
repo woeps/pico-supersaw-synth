@@ -25,6 +25,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Verify picotool
+        run: which picotool && picotool --version || echo "picotool not found"
+
       - name: Configure
         run: cmake -B build -G Ninja
 
