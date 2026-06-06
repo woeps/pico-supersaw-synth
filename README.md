@@ -23,6 +23,7 @@ Simple midi controlled supersaw synthesizer.
 | MIDI DIN 5-pin socket | 1 | or use a second 3.5mm TRS Jack |
 | 3.5mm TRS jack | 1 | Audio output |
 | Power supply | 1 | USB or 5V via VSYS |
+| Wire | • | |
 
 ## Technology
 
