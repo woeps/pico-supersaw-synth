@@ -11,6 +11,18 @@ Simple midi controlled supersaw synthesizer.
 - serial MIDI-Input (UART)
 - Audio Output (TRS)
 
+## Bill of Materials
+
+| Part | Quantity | Notes |
+|------|----------|-------|
+| Raspberry Pi Pico (RP2040) | 1 | |
+| PCM5102A DAC module | 1 | |
+| H11L1 optocoupler | 1 | MIDI isolation |
+| 220Ω resistor | 1 | MIDI input current limiting |
+| MIDI DIN 5-pin socket | 1 | or use a second 3.5mm TRS Jack |
+| 3.5mm TRS jack | 1 | Audio output |
+| Power supply | 1 | USB or 5V via VSYS |
+
 ## Technology
 
 - written in C++ with pico-sdk
@@ -23,13 +35,23 @@ Simple midi controlled supersaw synthesizer.
 
 ### Parameters
 
-- Envelope
-    - attack
-    - decay
-    - sustain
-    - release
-- Detune
-- Spread
+All parameters are controllable via MIDI CC:
+
+| CC | Parameter | Range |
+|----|-----------|-------|
+| 70 | Filter mode | 0=LPF, 1=HPF, 2=BPF |
+| 71 | Filter resonance | 0–127 |
+| 72 | Envelope release | 0–127 |
+| 73 | Envelope attack | 0–127 |
+| 74 | Filter cutoff | 0–127 |
+| 75 | Envelope decay | 0–127 |
+| 79 | Envelope sustain | 0–127 |
+| 85 | Pitch bend range | 0–24 semitones |
+| 91 | Chorus depth | 0–127 |
+| 92 | Chorus rate | 0–127 |
+| 93 | Stereo spread | 0–127 |
+| 94 | Detune | 0–127 |
+| 95 | Mix (dry/wet) | 0–127 |
 
 ## Milestones
 
@@ -66,7 +88,7 @@ Simple midi controlled supersaw synthesizer.
 
 ### 5. Fine-tune sound to get closer to jp8000 sound
 
-TODO: research the original algorithm more deeply and try to adapt the current implementation to get closer to the original sound.
+research the original algorithm more deeply and try to adapt the current implementation to get closer to the original sound.
 
 - randomize phase of each saw wave
 
