@@ -27,7 +27,7 @@ RUN git clone --recursive --branch ${PICO_EXTRAS_VERSION} \
 ARG PICOTOOL_VERSION=2.1.1
 RUN git clone --recursive --branch ${PICOTOOL_VERSION} \
     https://github.com/raspberrypi/picotool.git /tmp/picotool \
-    && cmake -S /tmp/picotool -B /tmp/picotool/build -G Ninja \
+    && PICO_SDK_PATH=/pico-sdk cmake -S /tmp/picotool -B /tmp/picotool/build -G Ninja \
     && ninja -C /tmp/picotool/build \
     && cp /tmp/picotool/build/picotool /usr/local/bin/ \
     && rm -rf /tmp/picotool
