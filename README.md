@@ -15,6 +15,7 @@ Simple midi controlled supersaw synthesizer.
 
 | Part | Quantity | Notes |
 |------|----------|-------|
+| Breadboard / PCB | 1 | |
 | Raspberry Pi Pico (RP2040) | 1 | |
 | PCM5102A DAC module | 1 | |
 | H11L1 optocoupler | 1 | MIDI isolation |
@@ -103,3 +104,4 @@ Experiment and try to see what is possible to implement on the rp2040:
 ## Ideas
 
 - handle after-touch messages as filter cutoff modulation
+- legato
