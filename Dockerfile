@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc-arm-none-eabi \
     libnewlib-arm-none-eabi \
     libstdc++-arm-none-eabi-newlib \
+    libusb-1.0-0-dev \
+    pkg-config \
     git \
     python3 \
     ca-certificates \
