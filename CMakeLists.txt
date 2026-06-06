@@ -57,7 +57,7 @@ add_executable(supersaw_midi_synth
 
 # binary info (readable by picotool)
 pico_set_program_name(supersaw_midi_synth "Supersaw MIDI Synth")
-pico_set_program_version(supersaw_midi_synth "0.1")
+pico_set_program_version(supersaw_midi_synth "1.0.0")
 pico_set_program_description(supersaw_midi_synth "MIDI controlled supersaw synthesizer")
 pico_set_program_url(supersaw_midi_synth "https://github.com/woeps/supersaw-midi-synth")
 
